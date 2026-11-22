@@ -24,6 +24,7 @@ export interface UserRow {
   is_totp_verified: number;
   teacher_id?: string | null;
   batch_id?: string | null;
+  department_id?: string | null;
   created_at: string;
 }
 
@@ -34,6 +35,7 @@ export interface UserPayload {
   name: string;
   teacherId?: string | null;
   batchId?: string | null;
+  departmentId?: string | null;
 }
 
 export class AuthService {

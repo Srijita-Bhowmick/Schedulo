@@ -9,6 +9,7 @@ router.get('/', EntityController.getAll);
 
 // Protected entity modifications (Admin only)
 router.post('/teachers', authenticateToken, requireRole('ADMIN'), EntityController.createTeacher);
+router.post('/teachers/:id/share', authenticateToken, requireRole('ADMIN'), EntityController.shareTeacher);
 router.put('/teachers/:id', authenticateToken, requireRole('ADMIN'), EntityController.updateTeacher);
 router.delete('/teachers/:id', authenticateToken, requireRole('ADMIN'), EntityController.deleteTeacher);
 

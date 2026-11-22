@@ -26,14 +26,17 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Play,
+  Plus,
   Radio,
   RefreshCw,
   Send,
   Settings2,
+  Share2,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Sun,
+  Trash2,
   UserRound,
   Users,
   X,
@@ -53,14 +56,25 @@ import {
   SolverResult,
   StudentDashboardData,
   TeacherDashboardData,
+  commitReschedule,
   createAuthSession,
+  createBatch,
+  createFaculty,
+  createRoom,
+  createSubject,
+  deleteBatch,
+  deleteFaculty,
+  deleteRoom,
+  deleteSubject,
   getDepartments,
   getHodDashboard,
   getStudentDashboard,
   getTeacherDashboard,
   publishTimetable,
   runDeterministicSolver,
+  shareFaculty,
   updateCollegeConfig,
+  updateTeacherAvailability,
   validateReschedule,
   verifyTwoFactor,
 } from './services/api'
@@ -191,6 +205,14 @@ function LandingPage() {
 }
 
 function ArchitectureModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
   return (
     <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
       <motion.div className="modal" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 18 }} onClick={(event) => event.stopPropagation()}>
@@ -955,12 +977,18 @@ function TeacherDashboard() {
 
   if (!data) return <LoadingDashboard />
 
-  const toggleSlot = (day: string, time: string) => {
+  const toggleSlot = async (day: string, time: string) => {
     const key = `${day}-${time}`
-    setUnavailable((items) => {
-      const next = items.includes(key) ? items.filter((item) => item !== key) : [...items, key]
-      return next
-    })
+    const next = unavailable.includes(key) ? unavailable.filter((item) => item !== key) : [...unavailable, key]
+    setUnavailable(next)
+    setToast(next.includes(key) ? `Blocked ${day} ${time} for solver.` : `Unblocked ${day} ${time}.`)
+    setTimeout(() => setToast(''), 3000)
+
+    try {
+      await updateTeacherAvailability('t-1', next)
+    } catch (err) {
+      console.warn('Failed to update teacher availability:', err)
+    }
   }
 
   const handleRescheduleBlock = (block: ScheduleBlock) => {
@@ -978,10 +1006,26 @@ function TeacherDashboard() {
     setLoading(false)
   }
 
-  const confirmReschedule = () => {
-    setModalOpen(false)
-    setToast(`Class reschedule request recorded (${isThisWeekOnly ? 'This Week Only' : 'Permanent'}). Alert dispatched.`)
-    setTimeout(() => setToast(''), 3000)
+  const confirmReschedule = async () => {
+    setLoading(true)
+    try {
+      const res = await commitReschedule({
+        targetRoom,
+        targetBatch,
+        isThisWeekOnly,
+        day: selectedBlock?.day || 'Wednesday',
+      })
+      setModalOpen(false)
+      setToast(res.message || `Class reschedule recorded (${isThisWeekOnly ? 'This Week Only' : 'Permanent'}). Alert dispatched.`)
+      const refreshed = await getTeacherDashboard()
+      setData(refreshed)
+      setUnavailable(refreshed.unavailable)
+    } catch (err: any) {
+      setToast(err.message || 'Reschedule failed.')
+    } finally {
+      setLoading(false)
+      setTimeout(() => setToast(''), 4000)
+    }
   }
 
   return (
@@ -1118,6 +1162,14 @@ function RescheduleModal({
   onConfirm: () => void
   onClose: () => void
 }) {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
   return (
     <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onClose}>
       <motion.div className="modal" initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} onClick={(event) => event.stopPropagation()}>
@@ -1187,6 +1239,43 @@ function RescheduleModal({
   )
 }
 
+function ModalDialog({
+  title,
+  subtitle,
+  children,
+  onClose,
+}: {
+  title: string
+  subtitle: string
+  children: React.ReactNode
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
+  return (
+    <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
+      <motion.div className="modal" initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal__header">
+          <div>
+            <h3>{title}</h3>
+            <p>{subtitle}</p>
+          </div>
+          <button className="modal__close" onClick={onClose} aria-label="Close modal">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="modal__body">{children}</div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
 /* ========================================================= */
 /* HOD / DEPARTMENT ADMIN DASHBOARD                          */
 /* ========================================================= */
@@ -1203,6 +1292,34 @@ function HodDashboard() {
   // Editable College & Dept Settings
   const [collegeNameInput, setCollegeNameInput] = useState('')
   const [copiedCode, setCopiedCode] = useState(false)
+
+  // CRUD Modal & Feedback State
+  const [activeModal, setActiveModal] = useState<'none' | 'addRoom' | 'addFaculty' | 'shareFaculty' | 'addBatch' | 'addSubject'>('none')
+  const [toast, setToast] = useState('')
+
+  // Modal Input States
+  const [newRoomNumber, setNewRoomNumber] = useState('')
+  const [newRoomCapacity, setNewRoomCapacity] = useState('60')
+  const [newRoomBuilding, setNewRoomBuilding] = useState('Academic Block 1')
+  const [newRoomIsShared, setNewRoomIsShared] = useState(false)
+
+  const [newFacultyName, setNewFacultyName] = useState('')
+  const [newFacultyCode, setNewFacultyCode] = useState('')
+  const [newFacultyEmail, setNewFacultyEmail] = useState('')
+
+  const [shareTeacherId, setShareTeacherId] = useState('')
+  const [shareDeptId, setShareDeptId] = useState('dept-it')
+
+  const [newBatchName, setNewBatchName] = useState('')
+  const [newBatchSemester, setNewBatchSemester] = useState(5)
+  const [newBatchSection, setNewBatchSection] = useState('B')
+  const [newBatchStudents, setNewBatchStudents] = useState(60)
+
+  const [newSubjectCode, setNewSubjectCode] = useState('')
+  const [newSubjectName, setNewSubjectName] = useState('')
+  const [newSubjectHours, setNewSubjectHours] = useState(3)
+  const [newSubjectTeacherId, setNewSubjectTeacherId] = useState('')
+  const [newSubjectDoubleBlock, setNewSubjectDoubleBlock] = useState(false)
 
   const fetchDashboardData = () => {
     getHodDashboard().then((res) => {
@@ -1240,6 +1357,141 @@ function HodDashboard() {
   const saveCollegeName = async () => {
     await updateCollegeConfig({ collegeName: collegeNameInput })
     fetchDashboardData()
+    setToast('College configuration updated.')
+    setTimeout(() => setToast(''), 3000)
+  }
+
+  // CRUD Handlers
+  const handleAddRoom = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newRoomNumber) return
+    const ok = await createRoom({
+      roomNumber: newRoomNumber,
+      capacity: Number(newRoomCapacity) || 60,
+      building: newRoomBuilding || 'Academic Block',
+      isShared: newRoomIsShared,
+    })
+    if (ok) {
+      setToast(`Theory Room ${newRoomNumber} added.`)
+      setActiveModal('none')
+      setNewRoomNumber('')
+      fetchDashboardData()
+    } else {
+      setToast('Failed to create room.')
+    }
+    setTimeout(() => setToast(''), 3500)
+  }
+
+  const handleDeleteRoom = async (id: string, name: string) => {
+    if (!window.confirm(`Delete ${name}?`)) return
+    const ok = await deleteRoom(id)
+    setToast(ok ? `${name} deleted.` : 'Failed to delete room.')
+    if (ok) fetchDashboardData()
+    setTimeout(() => setToast(''), 3500)
+  }
+
+  const handleAddFaculty = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newFacultyName) return
+    const ok = await createFaculty({
+      name: newFacultyName,
+      shortCode: newFacultyCode || newFacultyName.slice(0, 3).toUpperCase(),
+      email: newFacultyEmail || `${newFacultyName.toLowerCase().replace(/\s+/g, '.')}@schedulo.edu`,
+      department: data.department,
+    })
+    if (ok) {
+      setToast(`Faculty ${newFacultyName} registered.`)
+      setActiveModal('none')
+      setNewFacultyName('')
+      setNewFacultyCode('')
+      setNewFacultyEmail('')
+      fetchDashboardData()
+    } else {
+      setToast('Failed to create faculty member.')
+    }
+    setTimeout(() => setToast(''), 3500)
+  }
+
+  const handleShareFaculty = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const teacherId = shareTeacherId || data.faculty[0]?.id
+    if (!teacherId) return
+    const ok = await shareFaculty(teacherId, shareDeptId)
+    if (ok) {
+      setToast('Faculty member shared across departments.')
+      setActiveModal('none')
+      fetchDashboardData()
+    } else {
+      setToast('Failed to share faculty.')
+    }
+    setTimeout(() => setToast(''), 3500)
+  }
+
+  const handleDeleteFaculty = async (id: string, name: string) => {
+    if (!window.confirm(`Delete faculty ${name}?`)) return
+    const ok = await deleteFaculty(id)
+    setToast(ok ? `Faculty ${name} deleted.` : 'Failed to delete faculty.')
+    if (ok) fetchDashboardData()
+    setTimeout(() => setToast(''), 3500)
+  }
+
+  const handleAddBatch = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newBatchName) return
+    const ok = await createBatch({
+      name: newBatchName,
+      semester: Number(newBatchSemester) || 5,
+      section: newBatchSection || 'A',
+      studentCount: Number(newBatchStudents) || 60,
+    })
+    if (ok) {
+      setToast(`Batch ${newBatchName} created.`)
+      setActiveModal('none')
+      setNewBatchName('')
+      fetchDashboardData()
+    } else {
+      setToast('Failed to create batch.')
+    }
+    setTimeout(() => setToast(''), 3500)
+  }
+
+  const handleDeleteBatch = async (id: string, name: string) => {
+    if (!window.confirm(`Delete batch ${name}?`)) return
+    const ok = await deleteBatch(id)
+    setToast(ok ? `Batch ${name} deleted.` : 'Failed to delete batch.')
+    if (ok) fetchDashboardData()
+    setTimeout(() => setToast(''), 3500)
+  }
+
+  const handleAddSubject = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newSubjectCode || !newSubjectName) return
+    const teacherId = newSubjectTeacherId || data.faculty[0]?.id || 't-1'
+    const ok = await createSubject({
+      code: newSubjectCode.toUpperCase(),
+      name: newSubjectName,
+      weeklyHours: Number(newSubjectHours) || 3,
+      assignedTeacherId: teacherId,
+      allowTwoHourBlock: newSubjectDoubleBlock,
+    })
+    if (ok) {
+      setToast(`Subject ${newSubjectCode} registered.`)
+      setActiveModal('none')
+      setNewSubjectCode('')
+      setNewSubjectName('')
+      fetchDashboardData()
+    } else {
+      setToast('Failed to create subject.')
+    }
+    setTimeout(() => setToast(''), 3500)
+  }
+
+  const handleDeleteSubject = async (id: string, name: string) => {
+    if (!window.confirm(`Delete subject ${name}?`)) return
+    const ok = await deleteSubject(id)
+    setToast(ok ? `Subject ${name} deleted.` : 'Failed to delete subject.')
+    if (ok) fetchDashboardData()
+    setTimeout(() => setToast(''), 3500)
   }
 
   // Filter blocks based on dropdown selection
@@ -1401,113 +1653,202 @@ function HodDashboard() {
 
               {/* Tab 2: Rooms */}
               {tab === 'Rooms' && (
-                <table className="setup-table">
-                  <thead>
-                    <tr>
-                      <th>THEORY ROOM</th>
-                      <th>BUILDING</th>
-                      <th>CAPACITY</th>
-                      <th>TYPE</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.rooms.map((r) => (
-                      <tr key={r.id}>
-                        <td style={{ fontWeight: 600 }}>{r.roomNumber}</td>
-                        <td>{r.building}</td>
-                        <td>{r.capacity} seats</td>
-                        <td>
-                          <Badge tone={r.isShared ? 'ember' : 'mist'}>
-                            {r.isShared ? 'SHARED' : 'DEPT'}
-                          </Badge>
-                        </td>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid rgba(144, 194, 231, 0.12)' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', color: 'var(--mist)' }}>
+                      {data.rooms.length} THEORY ROOMS REGISTERED
+                    </span>
+                    <Button tone="mist" size="sm" icon={Plus} onClick={() => setActiveModal('addRoom')}>
+                      Add Theory Room
+                    </Button>
+                  </div>
+                  <table className="setup-table">
+                    <thead>
+                      <tr>
+                        <th>THEORY ROOM</th>
+                        <th>BUILDING</th>
+                        <th>CAPACITY</th>
+                        <th>TYPE</th>
+                        <th style={{ width: 50, textAlign: 'center' }}>ACTION</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {data.rooms.map((r) => (
+                        <tr key={r.id}>
+                          <td style={{ fontWeight: 600 }}>{r.roomNumber}</td>
+                          <td>{r.building}</td>
+                          <td>{r.capacity} seats</td>
+                          <td>
+                            <Badge tone={r.isShared ? 'ember' : 'mist'}>
+                              {r.isShared ? 'SHARED' : 'DEPT'}
+                            </Badge>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              className="action-delete-btn"
+                              title={`Delete ${r.roomNumber}`}
+                              onClick={() => handleDeleteRoom(r.id, r.roomNumber)}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
 
               {/* Tab 3: Faculty */}
               {tab === 'Faculty' && (
-                <table className="setup-table">
-                  <thead>
-                    <tr>
-                      <th>FACULTY MEMBER</th>
-                      <th>SHORT CODE</th>
-                      <th>DEPARTMENT</th>
-                      <th>STATUS</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.faculty.map((f) => (
-                      <tr key={f.id}>
-                        <td style={{ fontWeight: 600 }}>{f.name}</td>
-                        <td><span className="mono">{f.shortCode}</span></td>
-                        <td>{f.department}</td>
-                        <td>
-                          <Badge tone={f.isShared ? 'ember' : 'mist'} dot>
-                            {f.isShared ? 'SHARED' : 'ACTIVE'}
-                          </Badge>
-                        </td>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid rgba(144, 194, 231, 0.12)', flexWrap: 'wrap', gap: 8 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', color: 'var(--mist)' }}>
+                      {data.faculty.length} FACULTY MEMBERS IN ROSTER
+                    </span>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Button tone="light" size="sm" icon={Share2} onClick={() => setActiveModal('shareFaculty')}>
+                        Share Faculty
+                      </Button>
+                      <Button tone="mist" size="sm" icon={Plus} onClick={() => setActiveModal('addFaculty')}>
+                        Add Faculty
+                      </Button>
+                    </div>
+                  </div>
+                  <table className="setup-table">
+                    <thead>
+                      <tr>
+                        <th>FACULTY MEMBER</th>
+                        <th>SHORT CODE</th>
+                        <th>DEPARTMENT</th>
+                        <th>STATUS</th>
+                        <th style={{ width: 50, textAlign: 'center' }}>ACTION</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {data.faculty.map((f) => (
+                        <tr key={f.id}>
+                          <td style={{ fontWeight: 600 }}>{f.name}</td>
+                          <td><span className="mono">{f.shortCode}</span></td>
+                          <td>{f.department}</td>
+                          <td>
+                            <Badge tone={f.isShared ? 'ember' : 'mist'} dot>
+                              {f.isShared ? 'SHARED' : 'ACTIVE'}
+                            </Badge>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              className="action-delete-btn"
+                              title={`Delete ${f.name}`}
+                              onClick={() => handleDeleteFaculty(f.id, f.name)}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
 
               {/* Tab 4: Batches */}
               {tab === 'Batches' && (
-                <table className="setup-table">
-                  <thead>
-                    <tr>
-                      <th>BATCH</th>
-                      <th>SEMESTER</th>
-                      <th>SECTION</th>
-                      <th>STUDENTS</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.batches.map((b) => (
-                      <tr key={b.id}>
-                        <td style={{ fontWeight: 600 }}>{b.name}</td>
-                        <td>Semester {b.semester}</td>
-                        <td>Section {b.section}</td>
-                        <td>{b.studentCount} enrolled</td>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid rgba(144, 194, 231, 0.12)' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', color: 'var(--mist)' }}>
+                      {data.batches.length} STUDENT BATCHES ACTIVE
+                    </span>
+                    <Button tone="mist" size="sm" icon={Plus} onClick={() => setActiveModal('addBatch')}>
+                      Add Batch
+                    </Button>
+                  </div>
+                  <table className="setup-table">
+                    <thead>
+                      <tr>
+                        <th>BATCH</th>
+                        <th>SEMESTER</th>
+                        <th>SECTION</th>
+                        <th>STUDENTS</th>
+                        <th style={{ width: 50, textAlign: 'center' }}>ACTION</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {data.batches.map((b) => (
+                        <tr key={b.id}>
+                          <td style={{ fontWeight: 600 }}>{b.name}</td>
+                          <td>Semester {b.semester}</td>
+                          <td>Section {b.section}</td>
+                          <td>{b.studentCount} enrolled</td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              className="action-delete-btn"
+                              title={`Delete ${b.name}`}
+                              onClick={() => handleDeleteBatch(b.id, b.name)}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
 
               {/* Tab 5: Subjects */}
               {tab === 'Subjects' && (
-                <table className="setup-table">
-                  <thead>
-                    <tr>
-                      <th>SUBJECT</th>
-                      <th>HOURS/WK</th>
-                      <th>ASSIGNED FACULTY</th>
-                      <th>2-HR BLOCK</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.subjects.map((s) => (
-                      <tr key={s.id}>
-                        <div>
-                          <strong style={{ display: 'block', fontSize: 12 }}>{s.name}</strong>
-                          <span className="mono" style={{ fontSize: 10, color: 'var(--mist)' }}>{s.code}</span>
-                        </div>
-                        <td>{s.hours} hrs</td>
-                        <td>{s.teacher}</td>
-                        <td>
-                          <Badge tone={s.isDoubleBlock ? 'ember' : 'neutral'}>
-                            {s.isDoubleBlock ? '2-HR LAB/THEORY' : '1-HR'}
-                          </Badge>
-                        </td>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid rgba(144, 194, 231, 0.12)' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', color: 'var(--mist)' }}>
+                      {data.subjects.length} THEORY SUBJECTS ASSIGNED
+                    </span>
+                    <Button tone="mist" size="sm" icon={Plus} onClick={() => setActiveModal('addSubject')}>
+                      Add Subject
+                    </Button>
+                  </div>
+                  <table className="setup-table">
+                    <thead>
+                      <tr>
+                        <th>SUBJECT</th>
+                        <th>HOURS/WK</th>
+                        <th>ASSIGNED FACULTY</th>
+                        <th>2-HR BLOCK</th>
+                        <th style={{ width: 50, textAlign: 'center' }}>ACTION</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {data.subjects.map((s) => (
+                        <tr key={s.id}>
+                          <td>
+                            <strong style={{ display: 'block', fontSize: 12 }}>{s.name}</strong>
+                            <span className="mono" style={{ fontSize: 10, color: 'var(--mist)' }}>{s.code}</span>
+                          </td>
+                          <td>{s.hours} hrs</td>
+                          <td>{s.teacher}</td>
+                          <td>
+                            <Badge tone={s.isDoubleBlock ? 'ember' : 'neutral'}>
+                              {s.isDoubleBlock ? '2-HR LAB/THEORY' : '1-HR'}
+                            </Badge>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              className="action-delete-btn"
+                              title={`Delete ${s.name}`}
+                              onClick={() => handleDeleteSubject(s.id, s.name)}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </Surface>
 
@@ -1602,6 +1943,239 @@ function HodDashboard() {
           </div>
         </div>
 
+        {/* CRUD Modals */}
+        <AnimatePresence>
+          {activeModal === 'addRoom' && (
+            <ModalDialog
+              title="Add Theory Room"
+              subtitle="Register a theory lecture hall (no lab constraints). Mark as shared if accessible college-wide."
+              onClose={() => setActiveModal('none')}
+            >
+              <form onSubmit={handleAddRoom} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <Field
+                  label="ROOM NUMBER"
+                  placeholder="e.g. Room 103"
+                  value={newRoomNumber}
+                  onChange={(e) => setNewRoomNumber(e.target.value)}
+                  required
+                />
+                <Field
+                  label="CAPACITY (SEATS)"
+                  type="number"
+                  placeholder="60"
+                  value={newRoomCapacity}
+                  onChange={(e) => setNewRoomCapacity(e.target.value)}
+                  required
+                />
+                <Field
+                  label="BUILDING"
+                  placeholder="Academic Block 1"
+                  value={newRoomBuilding}
+                  onChange={(e) => setNewRoomBuilding(e.target.value)}
+                />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', marginTop: 4 }}>
+                  <input
+                    type="checkbox"
+                    checked={newRoomIsShared}
+                    onChange={(e) => setNewRoomIsShared(e.target.checked)}
+                    style={{ width: 16, height: 16, accentColor: 'var(--mist)' }}
+                  />
+                  <span>Shared College Lecture Hall (Open to all departments)</span>
+                </label>
+                <div className="modal-actions-row">
+                  <Button type="button" tone="ghost" onClick={() => setActiveModal('none')}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" tone="mist" icon={Plus}>
+                    Save Theory Room
+                  </Button>
+                </div>
+              </form>
+            </ModalDialog>
+          )}
+
+          {activeModal === 'addFaculty' && (
+            <ModalDialog
+              title="Register Faculty Member"
+              subtitle="Add a faculty member to your department teaching roster."
+              onClose={() => setActiveModal('none')}
+            >
+              <form onSubmit={handleAddFaculty} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <Field
+                  label="FULL NAME"
+                  placeholder="e.g. Dr. Ramesh Gupta"
+                  value={newFacultyName}
+                  onChange={(e) => setNewFacultyName(e.target.value)}
+                  required
+                />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <Field
+                    label="SHORT CODE"
+                    placeholder="RG"
+                    value={newFacultyCode}
+                    onChange={(e) => setNewFacultyCode(e.target.value.toUpperCase())}
+                  />
+                  <Field
+                    label="EMAIL"
+                    placeholder="ramesh@schedulo.edu"
+                    value={newFacultyEmail}
+                    onChange={(e) => setNewFacultyEmail(e.target.value)}
+                  />
+                </div>
+                <div className="modal-actions-row">
+                  <Button type="button" tone="ghost" onClick={() => setActiveModal('none')}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" tone="mist" icon={Plus}>
+                    Register Faculty
+                  </Button>
+                </div>
+              </form>
+            </ModalDialog>
+          )}
+
+          {activeModal === 'shareFaculty' && (
+            <ModalDialog
+              title="Share Faculty Cross-Department"
+              subtitle="Allow a professor to teach in another department without double-booking."
+              onClose={() => setActiveModal('none')}
+            >
+              <form onSubmit={handleShareFaculty} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <SelectField label="FACULTY MEMBER" value={shareTeacherId} onChange={(e) => setShareTeacherId(e.target.value)}>
+                  {data.faculty.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name} ({f.shortCode})
+                    </option>
+                  ))}
+                </SelectField>
+                <SelectField label="TARGET DEPARTMENT TO SHARE WITH" value={shareDeptId} onChange={(e) => setShareDeptId(e.target.value)}>
+                  <option value="dept-ece">Electronics & Communication (ECE)</option>
+                  <option value="dept-it">Information Technology (IT)</option>
+                </SelectField>
+                <p style={{ fontSize: 11, color: 'rgba(244, 246, 248, 0.6)', margin: 0 }}>
+                  The deterministic solver will synchronize minute-interval availability college-wide for this professor.
+                </p>
+                <div className="modal-actions-row">
+                  <Button type="button" tone="ghost" onClick={() => setActiveModal('none')}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" tone="mist" icon={Share2}>
+                    Share Faculty
+                  </Button>
+                </div>
+              </form>
+            </ModalDialog>
+          )}
+
+          {activeModal === 'addBatch' && (
+            <ModalDialog
+              title="Add Student Batch"
+              subtitle="Configure a student cohort for timetable allocation."
+              onClose={() => setActiveModal('none')}
+            >
+              <form onSubmit={handleAddBatch} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <Field
+                  label="BATCH NAME"
+                  placeholder="e.g. CSE-5B"
+                  value={newBatchName}
+                  onChange={(e) => setNewBatchName(e.target.value)}
+                  required
+                />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                  <Field
+                    label="SEMESTER"
+                    type="number"
+                    value={newBatchSemester}
+                    onChange={(e) => setNewBatchSemester(Number(e.target.value))}
+                    required
+                  />
+                  <Field
+                    label="SECTION"
+                    value={newBatchSection}
+                    onChange={(e) => setNewBatchSection(e.target.value.toUpperCase())}
+                    required
+                  />
+                  <Field
+                    label="STUDENTS"
+                    type="number"
+                    value={newBatchStudents}
+                    onChange={(e) => setNewBatchStudents(Number(e.target.value))}
+                    required
+                  />
+                </div>
+                <div className="modal-actions-row">
+                  <Button type="button" tone="ghost" onClick={() => setActiveModal('none')}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" tone="mist" icon={Plus}>
+                    Create Batch
+                  </Button>
+                </div>
+              </form>
+            </ModalDialog>
+          )}
+
+          {activeModal === 'addSubject' && (
+            <ModalDialog
+              title="Add Theory Subject"
+              subtitle="Configure weekly lecture hours and assigned faculty."
+              onClose={() => setActiveModal('none')}
+            >
+              <form onSubmit={handleAddSubject} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10 }}>
+                  <Field
+                    label="CODE"
+                    placeholder="CS505"
+                    value={newSubjectCode}
+                    onChange={(e) => setNewSubjectCode(e.target.value.toUpperCase())}
+                    required
+                  />
+                  <Field
+                    label="SUBJECT NAME"
+                    placeholder="Compiler Design"
+                    value={newSubjectName}
+                    onChange={(e) => setNewSubjectName(e.target.value)}
+                    required
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10 }}>
+                  <Field
+                    label="WEEKLY HOURS"
+                    type="number"
+                    value={newSubjectHours}
+                    onChange={(e) => setNewSubjectHours(Number(e.target.value))}
+                    required
+                  />
+                  <SelectField label="ASSIGNED PROFESSOR" value={newSubjectTeacherId} onChange={(e) => setNewSubjectTeacherId(e.target.value)}>
+                    {data.faculty.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name} ({f.shortCode})
+                      </option>
+                    ))}
+                  </SelectField>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', marginTop: 4 }}>
+                  <input
+                    type="checkbox"
+                    checked={newSubjectDoubleBlock}
+                    onChange={(e) => setNewSubjectDoubleBlock(e.target.checked)}
+                    style={{ width: 16, height: 16, accentColor: 'var(--mist)' }}
+                  />
+                  <span>Allow 2-Hour Continuous Theory/Lab Block</span>
+                </label>
+                <div className="modal-actions-row">
+                  <Button type="button" tone="ghost" onClick={() => setActiveModal('none')}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" tone="mist" icon={Plus}>
+                    Add Subject
+                  </Button>
+                </div>
+              </form>
+            </ModalDialog>
+          )}
+        </AnimatePresence>
+
         {selectedBlock && (
           <ClassDetailModal
             block={selectedBlock}
@@ -1609,6 +2183,8 @@ function HodDashboard() {
             onClose={() => setSelectedBlock(null)}
           />
         )}
+
+        {toast && <div className="toast">{toast}</div>}
       </main>
     </DashboardShell>
   )

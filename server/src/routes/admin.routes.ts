@@ -9,6 +9,8 @@ router.use(authenticateToken);
 router.use(requireRole('ADMIN'));
 
 router.post('/generate', AdminController.generateSchedule);
+router.post('/solve', AdminController.generateSchedule);
+router.post('/publish', AdminController.publishTimetable);
 router.post('/lock/:entryId', AdminController.toggleLock);
 router.delete('/schedule', AdminController.clearSchedule);
 

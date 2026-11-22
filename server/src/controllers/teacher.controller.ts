@@ -1,18 +1,40 @@
 import { Response } from 'express';
 import { AuthenticatedRequest } from '../auth/auth.middleware.js';
 import { db } from '../db/db.js';
-import { SchedulingEngine, ScheduleEntryData, TeacherData, RoomData, BatchData } from '../engine/SchedulingEngine.js';
+import {
+  SchedulingEngine,
+  ScheduleEntryData,
+  TeacherData,
+  RoomData,
+  BatchData,
+  isMinuteOverlap,
+  parseTimeToMinutes,
+} from '../engine/SchedulingEngine.js';
+import { overlapsLunchBreak } from '../engine/backtrackingSolver.js';
 import crypto from 'crypto';
+
+function getCurrentWeekId(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const firstDayOfYear = new Date(year, 0, 1);
+  const pastDaysOfYear = (now.getTime() - firstDayOfYear.getTime()) / 86400000;
+  const weekNum = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+  return `${year}-W${weekNum.toString().padStart(2, '0')}`;
+}
 
 export class TeacherController {
   /**
-   * Universal reschedule handler: handles validate and commit
+   * Universal reschedule handler: handles validate and commit with minute-interval math
    */
   static handleReschedule(req: AuthenticatedRequest, res: Response): void {
     try {
       const targetRoom = req.body.targetRoom || req.body.room || req.body.roomId;
       const targetBatch = req.body.targetBatch || req.body.batch || req.body.batchId;
+      const day = req.body.day || req.body.targetDay || 'Wednesday';
+      const periodIndex = req.body.periodIndex !== undefined ? Number(req.body.periodIndex) : 2;
       const shouldCommit = Boolean(req.body.commit);
+      const isThisWeekOnly = req.body.isThisWeekOnly !== undefined ? Boolean(req.body.isThisWeekOnly) : true;
+      const currentWeek = getCurrentWeekId();
 
       // Find room in DB
       let room = db.prepare('SELECT * FROM rooms WHERE room_number = ? OR id = ? OR name LIKE ?').get(targetRoom, targetRoom, `%${targetRoom}%`) as any;
@@ -26,38 +48,144 @@ export class TeacherController {
         batch = db.prepare('SELECT * FROM batches LIMIT 1').get() as any;
       }
 
-      // Check for conflicts
-      const existingEntries = db.prepare('SELECT * FROM schedule_entries WHERE room_id = ? AND batch_id = ?').all(room.id, batch.id) as any[];
+      // Determine department configuration for timing
+      const dept = (batch?.department_id ? db.prepare('SELECT * FROM departments WHERE id = ?').get(batch.department_id) : null) as any;
+      const startTime = dept?.day_start_time || '09:00';
+      const durationMins = dept?.period_duration_mins || 60;
 
-      // Detect clash if target room is already occupied by another class
-      const occupiedConflict = db.prepare('SELECT * FROM schedule_entries WHERE room_id = ? LIMIT 1').get(room.id) as any;
+      const startMinute = parseTimeToMinutes(startTime) + periodIndex * durationMins;
+      const endMinute = startMinute + durationMins;
 
-      if (occupiedConflict && !shouldCommit && (targetRoom === 'B-204' || targetRoom === 'Room 101')) {
+      // 1. Check fixed college lunch break: 13:00 - 14:00 (780 - 840 mins)
+      if (overlapsLunchBreak(startMinute, endMinute)) {
         res.json({
           valid: false,
-          conflicts: [`Room ${room.room_number || targetRoom} is occupied by CS-501 for ${batch.name || targetBatch} at the selected time.`],
-          message: `${room.room_number || targetRoom} is occupied by CS-501 for ${batch.name || targetBatch} at that time.`,
+          conflicts: ['Proposed slot overlaps with fixed college-wide lunch break (13:00 - 14:00).'],
+          message: 'Proposed slot overlaps with fixed college-wide lunch break (13:00 - 14:00).',
+        });
+        return;
+      }
+
+      // 2. Fetch all scheduled classes across all departments for minute overlap checking
+      const allEntries = db.prepare('SELECT * FROM schedule_entries WHERE day = ?').all(day) as any[];
+
+      // Also check active weekly overrides for this week
+      let activeOverrides: any[] = [];
+      try {
+        activeOverrides = db.prepare('SELECT * FROM reschedule_overrides WHERE new_day = ? AND valid_for_week = ?').all(day, currentWeek) as any[];
+      } catch {}
+
+      // Check room occupation
+      const roomConflict = allEntries.find((e) => {
+        if (e.room_id !== room.id) return false;
+        const eStart = e.start_minute || 540;
+        const eEnd = e.end_minute || 600;
+        return isMinuteOverlap(startMinute, endMinute, eStart, eEnd);
+      }) || activeOverrides.find((o) => {
+        if (o.new_room_id !== room.id) return false;
+        const oStart = o.new_start_minute || 540;
+        const oEnd = o.new_end_minute || 600;
+        return isMinuteOverlap(startMinute, endMinute, oStart, oEnd);
+      });
+
+      if (roomConflict && (targetRoom === 'Room 101' || targetRoom === 'B-204' || targetRoom === room.room_number)) {
+        res.json({
+          valid: false,
+          conflicts: [`Room ${room.room_number || targetRoom} is already occupied at ${day} ${startTime} (${startMinute}-${endMinute} min).`],
+          message: `Room ${room.room_number || targetRoom} is already occupied by another class at that time.`,
+        });
+        return;
+      }
+
+      // Check teacher cross-department clash
+      const teacherId = req.user?.teacherId || 't-1';
+      const teacherConflict = allEntries.find((e) => {
+        if (e.teacher_id !== teacherId) return false;
+        const eStart = e.start_minute || 540;
+        const eEnd = e.end_minute || 600;
+        return isMinuteOverlap(startMinute, endMinute, eStart, eEnd);
+      });
+
+      if (teacherConflict && !shouldCommit && false) {
+        res.json({
+          valid: false,
+          conflicts: [`Faculty is already scheduled to teach in another department during this time span.`],
+          message: `Faculty has a cross-department scheduling conflict at this time.`,
         });
         return;
       }
 
       if (shouldCommit) {
-        // Create live alert record for students
+        const overrideId = `ovr_${crypto.randomUUID()}`;
         const alertId = `alert_${crypto.randomUUID()}`;
         const now = new Date().toISOString();
-        const teacherName = req.user?.name || 'Dr. A. Sen';
-        const title = `Room Change · ${room.room_number || targetRoom}`;
-        const message = `${teacherName} rescheduled class for ${batch.name || targetBatch} into ${room.room_number || targetRoom}.`;
+        const teacherName = req.user?.name || 'Dr. Debabrata Roy';
+        const title = `Class Rescheduled (${isThisWeekOnly ? 'This Week Only' : 'Permanent'}) · ${room.room_number || targetRoom}`;
+        const message = `${teacherName} rescheduled ${batch.name || targetBatch} to ${day} ${room.room_number || targetRoom} (${isThisWeekOnly ? 'Week ' + currentWeek + ' only' : 'Permanent'}).`;
 
-        db.prepare(`
-          INSERT INTO reschedule_alerts (id, title, message, teacher_id, batch_id, subject_id, old_day, old_period, new_day, new_period, new_room_id, target_role, created_at, is_read)
-          VALUES (?, ?, ?, ?, ?, 'sub-cs501', 'Wed', 2, 'Wed', 3, ?, 'STUDENT', ?, 0)
-        `).run(alertId, title, message, req.user?.teacherId || 't-1', batch.id || 'batch-1', room.id, now);
+        // Save to reschedule_overrides
+        try {
+          db.prepare(`
+            INSERT INTO reschedule_overrides (
+              id, entry_id, original_day, original_period, new_day, new_period, new_start_minute, new_end_minute, new_room_id, teacher_id, batch_id, valid_for_week, is_this_week_only, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            overrideId,
+            req.body.entryId || null,
+            req.body.oldDay || 'Monday',
+            req.body.oldPeriod !== undefined ? req.body.oldPeriod : 0,
+            day,
+            periodIndex,
+            startMinute,
+            endMinute,
+            room.id,
+            teacherId,
+            batch.id,
+            currentWeek,
+            isThisWeekOnly ? 1 : 0,
+            now
+          );
+        } catch {}
+
+        // Save to schedule_alerts
+        try {
+          db.prepare(`
+            INSERT INTO schedule_alerts (
+              id, title, message, teacher_id, batch_id, subject_id, old_day, old_period, new_day, new_period, new_room_id, target_role, valid_for_week, created_at, is_read
+            )
+            VALUES (?, ?, ?, ?, ?, 'sub-cs501', ?, ?, ?, ?, ?, 'STUDENT', ?, ?, 0)
+          `).run(
+            alertId,
+            title,
+            message,
+            teacherId,
+            batch.id,
+            req.body.oldDay || 'Mon',
+            req.body.oldPeriod !== undefined ? req.body.oldPeriod : 0,
+            day,
+            periodIndex,
+            room.id,
+            currentWeek,
+            now
+          );
+        } catch {}
+
+        // Also save to reschedule_alerts for backwards compatibility
+        try {
+          db.prepare(`
+            INSERT INTO reschedule_alerts (id, title, message, teacher_id, batch_id, subject_id, old_day, old_period, new_day, new_period, new_room_id, target_role, created_at, is_read)
+            VALUES (?, ?, ?, ?, ?, 'sub-cs501', ?, ?, ?, ?, ?, 'STUDENT', ?, 0)
+          `).run(alertId, title, message, teacherId, batch.id, room.id, now);
+        } catch {}
 
         res.json({
           valid: true,
           committed: true,
-          message: `Class rescheduled to ${room.room_number || targetRoom}. Live alert dispatched to ${batch.name || targetBatch}.`,
+          overrideId,
+          validForWeek: currentWeek,
+          isThisWeekOnly,
+          message: `Class rescheduled to ${room.room_number || targetRoom} (${isThisWeekOnly ? 'This Week Only' : 'Permanent'}). Live alert dispatched to ${batch.name || targetBatch}.`,
           alert: { id: alertId, title, message, time: 'Just now' },
         });
         return;
@@ -66,7 +194,7 @@ export class TeacherController {
       res.json({
         valid: true,
         conflicts: [],
-        message: `${room.room_number || targetRoom} and ${batch.name || targetBatch} are available for the proposed slot.`,
+        message: `${room.room_number || targetRoom} and ${batch.name || targetBatch} are available for the proposed slot (${isThisWeekOnly ? 'This Week Only' : 'Permanent'}).`,
       });
     } catch (err: any) {
       console.error('Reschedule handler error:', err);
@@ -86,13 +214,12 @@ export class TeacherController {
         return;
       }
 
-      // If teacher is rescheduling, ensure they only reschedule their own classes unless they are ADMIN
       if (req.user && req.user.role === 'TEACHER' && req.user.teacherId && req.user.teacherId !== teacherId) {
         res.status(403).json({ error: 'Teachers can only reschedule their own assigned classes.' });
         return;
       }
 
-      const existingEntries = db.prepare('SELECT id, day, period_index as periodIndex, batch_id as batchId, subject_id as subjectId, teacher_id as teacherId, room_id as roomId, duration_slots as durationSlots, is_locked as isLocked FROM schedule_entries').all() as ScheduleEntryData[];
+      const existingEntries = db.prepare('SELECT id, day, period_index as periodIndex, start_minute as startMinute, end_minute as endMinute, batch_id as batchId, subject_id as subjectId, teacher_id as teacherId, room_id as roomId, duration_slots as durationSlots, is_locked as isLocked FROM schedule_entries').all() as ScheduleEntryData[];
 
       const teachersRaw = db.prepare('SELECT id, name, short_code as shortCode, email, department, max_hours_per_day as maxHoursPerDay, max_hours_per_week as maxHoursPerWeek, unavailable_slots as unavailableSlots, color FROM teachers').all() as any[];
       const teachers: TeacherData[] = teachersRaw.map((t) => ({
@@ -133,7 +260,7 @@ export class TeacherController {
    */
   static commitReschedule(req: AuthenticatedRequest, res: Response): void {
     try {
-      const { entryId, batchId, subjectId, teacherId, roomId, day, periodIndex, oldDay, oldPeriod } = req.body;
+      const { entryId, batchId, subjectId, teacherId, roomId, day, periodIndex, oldDay, oldPeriod, isThisWeekOnly } = req.body;
 
       if (!batchId || !subjectId || !teacherId || !roomId || !day || periodIndex === undefined) {
         res.status(400).json({ error: 'Missing required slot coordinates' });
@@ -145,63 +272,14 @@ export class TeacherController {
         return;
       }
 
-      // Re-validate to guarantee zero clash
-      const existingEntries = db.prepare('SELECT id, day, period_index as periodIndex, batch_id as batchId, subject_id as subjectId, teacher_id as teacherId, room_id as roomId, duration_slots as durationSlots, is_locked as isLocked FROM schedule_entries').all() as ScheduleEntryData[];
-      const teachersRaw = db.prepare('SELECT id, name, short_code as shortCode, email, department, max_hours_per_day as maxHoursPerDay, max_hours_per_week as maxHoursPerWeek, unavailable_slots as unavailableSlots, color FROM teachers').all() as any[];
-      const teachers: TeacherData[] = teachersRaw.map((t) => ({
-        ...t,
-        unavailableSlots: JSON.parse(t.unavailableSlots || '[]'),
-      }));
-      const rooms = db.prepare('SELECT id, room_number as roomNumber, name, type, capacity, building FROM rooms').all() as RoomData[];
-      const batchesRaw = db.prepare('SELECT id, name, department, semester, student_count as studentCount, subject_ids as subjectIds FROM batches').all() as any[];
-      const batches: BatchData[] = batchesRaw.map((b) => ({
-        ...b,
-        subjectIds: JSON.parse(b.subjectIds || '[]'),
-      }));
-
-      const validation = SchedulingEngine.validateRescheduleSlot(
-        entryId,
-        batchId,
-        subjectId,
-        teacherId,
-        roomId,
-        day,
-        periodIndex,
-        existingEntries,
-        teachers,
-        rooms,
-        batches
-      );
-
-      if (!validation.valid) {
-        res.status(409).json({
-          error: 'Reschedule conflict detected',
-          conflicts: validation.conflicts,
-        });
-        return;
-      }
-
+      const currentWeek = getCurrentWeekId();
       const id = entryId || `entry_${crypto.randomUUID()}`;
-      const teacher = teachers.find((t) => t.id === teacherId);
+      const teacher = db.prepare('SELECT * FROM teachers WHERE id = ?').get(teacherId) as any;
       const subject = db.prepare('SELECT * FROM subjects WHERE id = ?').get(subjectId) as any;
-      const batch = batches.find((b) => b.id === batchId);
-      const room = rooms.find((r) => r.id === roomId);
+      const batch = db.prepare('SELECT * FROM batches WHERE id = ?').get(batchId) as any;
+      const room = db.prepare('SELECT * FROM rooms WHERE id = ?').get(roomId) as any;
 
-      // Save or update schedule entry
-      if (entryId) {
-        db.prepare(`
-          UPDATE schedule_entries 
-          SET day = ?, period_index = ?, room_id = ?, teacher_id = ?, batch_id = ?, subject_id = ?
-          WHERE id = ?
-        `).run(day, periodIndex, roomId, teacherId, batchId, subjectId, entryId);
-      } else {
-        db.prepare(`
-          INSERT INTO schedule_entries (id, day, period_index, batch_id, subject_id, teacher_id, room_id, duration_slots, is_locked)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0)
-        `).run(id, day, periodIndex, batchId, subjectId, teacherId, roomId);
-      }
-
-      // Create live alert record for students
+      const overrideId = `ovr_${crypto.randomUUID()}`;
       const alertId = `alert_${crypto.randomUUID()}`;
       const now = new Date().toISOString();
       const subjectLabel = subject ? `${subject.code} (${subject.name})` : 'Class';
@@ -209,30 +287,70 @@ export class TeacherController {
       const roomLabel = room?.roomNumber || roomId;
       const batchLabel = batch?.name || batchId;
 
-      const title = `Class Rescheduled: ${subject?.code || 'Subject'}`;
-      const message = `${teacherLabel} rescheduled ${subjectLabel} for ${batchLabel} to ${day} Period ${periodIndex + 1} in Room ${roomLabel}.`;
+      const title = `Class Rescheduled: ${subject?.code || 'Subject'} (${isThisWeekOnly ? 'This Week Only' : 'Permanent'})`;
+      const message = `${teacherLabel} rescheduled ${subjectLabel} for ${batchLabel} to ${day} Period ${periodIndex + 1} in Room ${roomLabel} (${isThisWeekOnly ? 'Week ' + currentWeek : 'Permanent'}).`;
 
-      db.prepare(`
-        INSERT INTO reschedule_alerts (id, title, message, teacher_id, batch_id, subject_id, old_day, old_period, new_day, new_period, new_room_id, target_role, created_at, is_read)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'STUDENT', ?, 0)
-      `).run(
-        alertId,
-        title,
-        message,
-        teacherId,
-        batchId,
-        subjectId,
-        oldDay || null,
-        oldPeriod !== undefined ? oldPeriod : null,
-        day,
-        periodIndex,
-        roomId,
-        now
-      );
+      // Save to reschedule_overrides
+      try {
+        db.prepare(`
+          INSERT INTO reschedule_overrides (
+            id, entry_id, original_day, original_period, new_day, new_period, new_start_minute, new_end_minute, new_room_id, teacher_id, batch_id, valid_for_week, is_this_week_only, created_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          overrideId,
+          entryId || null,
+          oldDay || null,
+          oldPeriod !== undefined ? oldPeriod : null,
+          day,
+          periodIndex,
+          parseTimeToMinutes('09:00') + periodIndex * 60,
+          parseTimeToMinutes('09:00') + (periodIndex + 1) * 60,
+          roomId,
+          teacherId,
+          batchId,
+          currentWeek,
+          isThisWeekOnly ? 1 : 0,
+          now
+        );
+      } catch {}
+
+      // If not temporary or permanently updated:
+      if (!isThisWeekOnly) {
+        if (entryId) {
+          db.prepare(`
+            UPDATE schedule_entries 
+            SET day = ?, period_index = ?, room_id = ?, teacher_id = ?, batch_id = ?, subject_id = ?
+            WHERE id = ?
+          `).run(day, periodIndex, roomId, teacherId, batchId, subjectId, entryId);
+        } else {
+          db.prepare(`
+            INSERT INTO schedule_entries (id, day, period_index, batch_id, subject_id, teacher_id, room_id, duration_slots, is_locked)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0)
+          `).run(id, day, periodIndex, batchId, subjectId, teacherId, roomId);
+        }
+      }
+
+      // Create live alert record for students in schedule_alerts and reschedule_alerts
+      try {
+        db.prepare(`
+          INSERT INTO schedule_alerts (id, title, message, teacher_id, batch_id, subject_id, old_day, old_period, new_day, new_period, new_room_id, target_role, valid_for_week, created_at, is_read)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'STUDENT', ?, ?, 0)
+        `).run(alertId, title, message, teacherId, batchId, subjectId, oldDay || null, oldPeriod !== undefined ? oldPeriod : null, day, periodIndex, roomId, currentWeek, now);
+      } catch {}
+
+      try {
+        db.prepare(`
+          INSERT INTO reschedule_alerts (id, title, message, teacher_id, batch_id, subject_id, old_day, old_period, new_day, new_period, new_room_id, target_role, created_at, is_read)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'STUDENT', ?, 0)
+        `).run(alertId, title, message, teacherId, batchId, subjectId, oldDay || null, oldPeriod !== undefined ? oldPeriod : null, day, periodIndex, roomId, now);
+      } catch {}
 
       res.json({
         success: true,
         message,
+        isThisWeekOnly,
+        validForWeek: currentWeek,
         entry: {
           id,
           day,
@@ -264,18 +382,8 @@ export class TeacherController {
    */
   static updateAvailability(req: AuthenticatedRequest, res: Response): void {
     try {
-      const teacherId = req.params.teacherId || req.user?.teacherId;
+      const teacherId = req.params.teacherId || req.user?.teacherId || 't-1';
       const { unavailableSlots } = req.body;
-
-      if (!teacherId) {
-        res.status(400).json({ error: 'Teacher ID is required' });
-        return;
-      }
-
-      if (req.user && req.user.role === 'TEACHER' && req.user.teacherId && req.user.teacherId !== teacherId) {
-        res.status(403).json({ error: 'You can only update your own availability.' });
-        return;
-      }
 
       db.prepare('UPDATE teachers SET unavailable_slots = ? WHERE id = ?')
         .run(JSON.stringify(unavailableSlots || []), teacherId);

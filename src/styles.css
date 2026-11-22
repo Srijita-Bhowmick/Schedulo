@@ -1764,3 +1764,166 @@ button { cursor: pointer; }
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ========================================================= */
+/* STRICT WCAG AAA HIGH-CONTRAST & ACCESSIBILITY AUDIT       */
+/* ========================================================= */
+
+/* Dark Surfaces High-Contrast Text */
+.hero-copy__intro {
+  color: #C7E3F7 !important;
+}
+.hero-meta {
+  color: #C7E3F7 !important;
+}
+.footer-strip {
+  color: #C7E3F7 !important;
+}
+.sidebar-copy p {
+  color: #C7E3F7 !important;
+}
+.sidebar-footer {
+  color: #C7E3F7 !important;
+}
+.detail-sub {
+  color: #C7E3F7 !important;
+}
+.field-hint {
+  color: #C7E3F7 !important;
+}
+
+/* Glacial Mist Badge & Pill: MUST use bold Deep Midnight Teal text */
+.badge--mist {
+  background: #90c2e7 !important;
+  color: #092327 !important;
+  font-weight: 700 !important;
+}
+.status-pill--mist {
+  background: #90c2e7 !important;
+  color: #092327 !important;
+  font-weight: 700 !important;
+}
+
+/* Coral Ember Contrast Fix */
+.badge--ember {
+  background: #C24127 !important;
+  color: #FFFFFF !important;
+  font-weight: 700 !important;
+}
+.btn--ember {
+  background: #C24127 !important;
+  color: #FFFFFF !important;
+  font-weight: 700 !important;
+}
+.btn--ember:hover {
+  background: #d6482c !important;
+}
+.button--ember {
+  background: #C24127 !important;
+  color: #FFFFFF !important;
+  font-weight: 700 !important;
+}
+.button--ember:hover {
+  background: #d6482c !important;
+}
+.status-pill--ember {
+  background: #C24127 !important;
+  color: #FFFFFF !important;
+  font-weight: 700 !important;
+}
+
+/* Light Surfaces (Soft Pearl Workspace & White Cards) */
+.dashboard-app.theme-light .dashboard-header h2,
+.dashboard-app.theme-light .topbar h1,
+.dashboard-app.theme-light .card-heading h3,
+.dashboard-app.theme-light strong {
+  color: #092327 !important;
+}
+.dashboard-app.theme-light .dashboard-header p,
+.dashboard-app.theme-light .card-heading p,
+.dashboard-app.theme-light .dashboard-kicker,
+.dashboard-app.theme-light .topbar-clock,
+.dashboard-app.theme-light .field-label,
+.dashboard-app.theme-light .setup-table th {
+  color: #1B3B42 !important;
+  font-weight: 600 !important;
+}
+
+.dashboard-app.theme-light .field input,
+.dashboard-app.theme-light .field select,
+.dashboard-app.theme-light .matrix-select {
+  background: #FFFFFF !important;
+  color: #092327 !important;
+  border: 1.5px solid #6F919B !important;
+}
+.dashboard-app.theme-light .field input::placeholder,
+.dashboard-app.theme-light .field select::placeholder {
+  color: #3A5A62 !important;
+}
+.dashboard-app.theme-light .field input:focus,
+.dashboard-app.theme-light .field select:focus,
+.dashboard-app.theme-light .matrix-select:focus {
+  border-color: #092327 !important;
+  box-shadow: 0 0 0 2px rgba(9, 35, 39, 0.25) !important;
+}
+
+.dashboard-app.theme-light .box-tile--empty {
+  background: #f1f5f7 !important;
+  border: 1.5px dashed #7B9CA6 !important;
+  color: #2B4D55 !important;
+}
+.dashboard-app.theme-light .box-tile--empty .empty-label {
+  color: #1B3B42 !important;
+  font-weight: 700 !important;
+}
+.dashboard-app.theme-light .box-tile--empty .empty-subtext {
+  color: #2B4D55 !important;
+  font-weight: 600 !important;
+}
+
+/* Universal Focus Rings */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible,
+div[role="button"]:focus-visible {
+  outline: 2px solid #90C2E7 !important;
+  outline-offset: 2px !important;
+}
+.dashboard-app.theme-light button:focus-visible,
+.dashboard-app.theme-light input:focus-visible,
+.dashboard-app.theme-light select:focus-visible,
+.dashboard-app.theme-light a:focus-visible,
+.dashboard-app.theme-light div[role="button"]:focus-visible {
+  outline: 2px solid #092327 !important;
+  outline-offset: 2px !important;
+}
+
+/* Action Delete Button */
+.action-delete-btn {
+  background: rgba(224, 109, 83, 0.12);
+  border: 1px solid rgba(224, 109, 83, 0.35);
+  color: #ff9e87;
+  border-radius: 4px;
+  padding: 5px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.action-delete-btn:hover {
+  background: #C24127;
+  color: #ffffff;
+  border-color: #C24127;
+}
+.theme-light .action-delete-btn {
+  background: rgba(194, 65, 39, 0.08);
+  border-color: rgba(194, 65, 39, 0.3);
+  color: #C24127;
+}
+.theme-light .action-delete-btn:hover {
+  background: #C24127;
+  color: #ffffff;
+}

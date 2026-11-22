@@ -212,6 +212,16 @@ export function ClassDetailModal({
   onClose: () => void
   onReschedule?: (block: ScheduleBlock) => void
 }) {
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
   if (!block) return null
 
   return (
