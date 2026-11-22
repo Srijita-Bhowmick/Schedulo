@@ -168,7 +168,8 @@ export function createsExcessiveConsecutiveClasses(
 
   for (let i = 1; i < all.length; i++) {
     const next = all[i];
-    if (next.start - currentEnd <= 15) {
+    // [M-11] Tighten consecutive adjacency from <= 15 to < 5 min so scheduled 15-min recesses aren't treated as back-to-back
+    if (next.start - currentEnd < 5) {
       currentEnd = Math.max(currentEnd, next.end);
     } else {
       if (currentEnd - currentStart > maxContinuousMinutes) {

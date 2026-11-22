@@ -35,6 +35,7 @@ export function initDatabase() {
       name TEXT NOT NULL,
       totp_secret TEXT NOT NULL,
       is_totp_verified INTEGER NOT NULL DEFAULT 0,
+      last_totp_step INTEGER DEFAULT 0,
       teacher_id TEXT,
       batch_id TEXT,
       department_id TEXT,
@@ -214,6 +215,7 @@ export function initDatabase() {
     "ALTER TABLE schedule_entries ADD COLUMN end_minute INTEGER DEFAULT 600",
     "ALTER TABLE schedule_entries ADD COLUMN department_id TEXT",
     "ALTER TABLE users ADD COLUMN department_id TEXT",
+    "ALTER TABLE users ADD COLUMN last_totp_step INTEGER DEFAULT 0",
     "ALTER TABLE time_slot_config ADD COLUMN college_name TEXT DEFAULT 'Apex Institute of Technology & Science'",
   ];
 

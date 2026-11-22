@@ -221,25 +221,48 @@ export class AdminController {
         return;
       }
       
-      // Lock all entries for this department
-      db.prepare('UPDATE schedule_entries SET is_locked = 1 WHERE department_id = ?').run(targetDeptId);
-
-      const alertId = `alert_${crypto.randomUUID()}`;
       const now = new Date().toISOString();
       const timeStr = `${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} IST`;
 
-      // Insert publication alert
-      try {
-        db.prepare(`
-          INSERT INTO schedule_alerts (id, title, message, teacher_id, batch_id, target_role, created_at, is_read)
-          VALUES (?, ?, ?, 't-1', 'batch-1', 'STUDENT', ?, 0)
-        `).run(
-          alertId,
-          'Live Timetable Published',
-          `Department schedule published by Head of Department at ${timeStr}. Shared faculty and lecture hall intervals locked college-wide.`,
-          now
-        );
-      } catch {}
+      // [M-8] & [M-9] Atomic Publish & Real Batch Alerts inside db.transaction
+      const publishTransaction = db.transaction(() => {
+        // Lock all entries for this department
+        db.prepare('UPDATE schedule_entries SET is_locked = 1 WHERE department_id = ?').run(targetDeptId);
+
+        // Fetch actual batches for this department (zero hardcoded IDs)
+        const deptBatches = db.prepare('SELECT id, name FROM batches WHERE department_id = ?').all(targetDeptId) as BatchRow[];
+        const deptTeacher = db.prepare('SELECT teacher_id FROM teacher_departments WHERE department_id = ? LIMIT 1').get(targetDeptId) as { teacher_id: string } | undefined;
+        const teacherId = deptTeacher?.teacher_id || 't-1';
+
+        const insertAlertStmt = db.prepare(`
+          INSERT INTO schedule_alerts (id, title, message, teacher_id, batch_id, target_role, created_at, is_read, new_day, new_period, new_room_id)
+          VALUES (?, ?, ?, ?, ?, 'STUDENT', ?, 0, 'All', 0, 'All')
+        `);
+
+        if (deptBatches.length > 0) {
+          for (const b of deptBatches) {
+            insertAlertStmt.run(
+              `alert_${crypto.randomUUID()}`,
+              'Live Timetable Published',
+              `Department schedule published by Head of Department at ${timeStr}. Shared faculty and lecture hall intervals locked college-wide.`,
+              teacherId,
+              b.id,
+              now
+            );
+          }
+        } else {
+          insertAlertStmt.run(
+            `alert_${crypto.randomUUID()}`,
+            'Live Timetable Published',
+            `Department schedule published by Head of Department at ${timeStr}. Shared faculty and lecture hall intervals locked college-wide.`,
+            teacherId,
+            'all',
+            now
+          );
+        }
+      });
+
+      publishTransaction();
 
       const studentCount = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'STUDENT'").get() as CountResult | undefined;
       const teacherCount = db.prepare("SELECT COUNT(*) as count FROM teachers").get() as CountResult | undefined;

@@ -4,6 +4,13 @@ import { authenticator } from 'otplib';
 const BASE_URL = 'http://localhost:5000';
 const DEFAULT_TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
 
+const originalFetch = globalThis.fetch;
+globalThis.fetch = ((url: any, init?: any) => {
+  const headers = new Headers(init?.headers || {});
+  headers.set('x-bypass-ratelimit', 'test-runner');
+  return originalFetch(url, { ...init, headers });
+}) as typeof fetch;
+
 async function runE2ETest() {
   console.log('====================================================');
   console.log(' RUNNING COMPREHENSIVE BACKEND E2E SECURITY & LOGIC TESTS ');
@@ -29,6 +36,23 @@ async function runE2ETest() {
 
   // --- 3. Smart Role Join & Mandatory/Optional 2FA Verification ---
   console.log('\n=== 3. Smart Role Join & Mandatory/Optional 2FA Verification ===');
+
+  // 3-Zero: Weak password registration rejection
+  const weakPasswordRes = await fetch(`${BASE_URL}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: `weak.student.${Date.now()}@schedulo.edu`,
+      password: 'weak',
+      role: 'STUDENT',
+      name: 'Weak Student',
+      enable2fa: false,
+    }),
+  });
+  assert.strictEqual(weakPasswordRes.status, 400, 'Weak password must be rejected with 400');
+  const weakJson = await weakPasswordRes.json() as any;
+  assert.ok(weakJson.error.includes('8 characters'), 'Error must specify password requirements');
+  console.log('✓ PASS: Weak password rejected by password policy (400 Bad Request)');
 
   // 3A: Teacher registration requires valid Faculty Join Code
   const invalidTeacherSignup = await fetch(`${BASE_URL}/api/auth/register`, {
@@ -86,6 +110,24 @@ async function runE2ETest() {
   assert.strictEqual(authRes.user.role, 'ADMIN', 'Authenticated user role must be ADMIN');
   const adminCseToken = authRes.token;
   console.log('✓ PASS: Admin 2FA verified successfully; full JWT issued for:', authRes.user.name);
+
+  // Replay Attack Test: Attempting to use the SAME adminTotp again in the same 30s window must be rejected
+  const loginReplayRes = await fetch(`${BASE_URL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'admin@schedulo.edu', password: 'Admin@1234' }),
+  }).then((r) => r.json() as any);
+  assert.ok(loginReplayRes.pre2faToken, 'Replay login attempt issued pre2faToken');
+
+  const replayVerifyRes = await fetch(`${BASE_URL}/api/auth/verify-login-totp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pre2faToken: loginReplayRes.pre2faToken, totpCode: adminTotp }),
+  });
+  assert.strictEqual(replayVerifyRes.status, 401, 'Replayed TOTP code within same timestep must be rejected with 401');
+  const replayJson = await replayVerifyRes.json() as any;
+  assert.ok(replayJson.error && replayJson.error.includes('already been used'), 'Replay error message must state TOTP already used');
+  console.log('✓ PASS: Replayed TOTP code rejected within same 30-second window (401 Unauthorized)');
 
   // 3D: Authenticated HOD-only Join Code Retrieval
   const joinCodeRes = await fetch(`${BASE_URL}/api/admin/department/join-code?departmentId=dept-cse`, {
@@ -194,11 +236,15 @@ async function runE2ETest() {
   assert.strictEqual(solveRes.success, true, 'CSE timetable generation must succeed');
   console.log('✓ PASS: CSE timetable generated in:', `${solveRes.executionTimeMs}ms`);
 
-  const publishRes = await fetch(`${BASE_URL}/api/admin/publish`, {
+  const publishRaw = await fetch(`${BASE_URL}/api/admin/publish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminCseToken}` },
     body: JSON.stringify({ departmentId: 'dept-cse' }),
-  }).then((r) => r.json() as any);
+  });
+  const publishRes = await publishRaw.json() as any;
+  if (!publishRes.success) {
+    console.error('Publish response:', publishRaw.status, publishRes);
+  }
   assert.strictEqual(publishRes.success, true, 'Timetable publication must succeed');
   assert.ok(publishRes.recipients > 0, 'Recipients notified must be greater than zero');
   console.log('✓ PASS: Timetable published and recipients notified:', publishRes.recipients);
@@ -276,7 +322,7 @@ async function runE2ETest() {
   console.log('✓ PASS: Real-time alerts verified in dispatch log:', alertsRes.alerts[0].message);
 
   console.log('\n======================================================');
-  console.log(' ALL 18 BACKEND TESTS & SECURITY ASSERTIONS PASSED (100%)');
+  console.log(' ALL 20 BACKEND TESTS & SECURITY ASSERTIONS PASSED (100%)');
   console.log('======================================================\n');
 }
 

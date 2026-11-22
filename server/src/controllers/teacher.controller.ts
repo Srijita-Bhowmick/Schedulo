@@ -21,15 +21,7 @@ import {
   RescheduleOverrideRow,
 } from '../types/db.types.js';
 import crypto from 'crypto';
-
-function getCurrentWeekId(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const firstDayOfYear = new Date(year, 0, 1);
-  const pastDaysOfYear = (now.getTime() - firstDayOfYear.getTime()) / 86400000;
-  const weekNum = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
-  return `${year}-W${weekNum.toString().padStart(2, '0')}`;
-}
+import { getCurrentIsoWeekIST } from '../utils/date.js';
 
 export class TeacherController {
   /**
@@ -56,7 +48,7 @@ export class TeacherController {
       const periodIndex = req.body.periodIndex !== undefined ? Number(req.body.periodIndex) : 2;
       const shouldCommit = Boolean(req.body.commit);
       const isThisWeekOnly = req.body.isThisWeekOnly !== undefined ? Boolean(req.body.isThisWeekOnly) : true;
-      const currentWeek = getCurrentWeekId();
+      const currentWeek = getCurrentIsoWeekIST();
 
       // Find room in DB
       let room = db.prepare('SELECT * FROM rooms WHERE room_number = ? OR id = ? OR name LIKE ?').get(targetRoom, targetRoom, `%${targetRoom}%`) as RoomRow | undefined;
@@ -322,7 +314,7 @@ export class TeacherController {
         }
       }
 
-      const currentWeek = getCurrentWeekId();
+      const currentWeek = getCurrentIsoWeekIST();
       const id = entryId || `entry_${crypto.randomUUID()}`;
       const teacher = db.prepare('SELECT * FROM teachers WHERE id = ?').get(teacherId) as TeacherRow | undefined;
       const subject = db.prepare('SELECT * FROM subjects WHERE id = ?').get(subjectId) as SubjectRow | undefined;

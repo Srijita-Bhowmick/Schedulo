@@ -1,9 +1,86 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, RoundedBox } from '@react-three/drei'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
 import * as THREE from 'three'
 import { Button } from './ui'
+
+// [M-24] WebGL Context Loss / Unsupported Hardware Error Boundary
+class WebGLErrorBoundary extends React.Component<
+  { children: ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    console.warn('WebGL context unavailable or lost, falling back to 2D matrix:', error)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div
+          className="spatial-fallback-grid"
+          style={{
+            padding: 32,
+            textAlign: 'center',
+            background: '#092327',
+            color: '#F4F6F8',
+            borderRadius: 12,
+            border: '1px solid rgba(144, 194, 231, 0.2)',
+            minHeight: 280,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+        >
+          <div
+            style={{
+              color: '#90C2E7',
+              fontFamily: 'JetBrains Mono, monospace',
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              marginBottom: 8,
+            }}
+          >
+            ARCHITECTURAL SPATIAL MATRIX · 2D FALLBACK
+          </div>
+          <p style={{ color: '#C7E3F7', fontSize: 12, maxWidth: 420, margin: '0 auto 16px' }}>
+            WebGL context is disabled or unaccelerated. Operating in deterministic 2D projection mode.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, width: '100%', maxWidth: 460 }}>
+            {['MON', 'TUE', 'WED', 'THU', 'FRI'].map((d) => (
+              <div
+                key={d}
+                style={{
+                  padding: '8px 4px',
+                  background: 'rgba(14, 48, 53, 0.9)',
+                  border: '1px solid rgba(144, 194, 231, 0.3)',
+                  borderRadius: 6,
+                  fontSize: 11,
+                  fontFamily: 'JetBrains Mono, monospace',
+                  color: '#90C2E7',
+                }}
+              >
+                {d}
+              </div>
+            ))}
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 const days = ['MON', 'TUE', 'WED', 'THU', 'FRI']
 const times = ['09', '10', '11', '12', '13', '14', '15']
@@ -21,6 +98,17 @@ function SceneParallax({ children }: { children: ReactNode }) {
   const { pointer } = useThree()
   useFrame(() => {
     if (!group.current) return
+    // [M-25] Honor prefers-reduced-motion accessibility preference
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
+
+    if (prefersReducedMotion) {
+      group.current.rotation.x = 0
+      group.current.rotation.y = 0
+      return
+    }
+
     const px = typeof pointer?.x === 'number' && Number.isFinite(pointer.x) ? pointer.x : 0
     const py = typeof pointer?.y === 'number' && Number.isFinite(pointer.y) ? pointer.y : 0
     group.current.rotation.y = THREE.MathUtils.lerp(group.current.rotation.y, px * 0.055, 0.06)
@@ -145,6 +233,16 @@ function TimetableTile({
 
   useFrame((_, delta) => {
     if (!mesh.current) return
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
+
+    if (prefersReducedMotion) {
+      mesh.current.position.set(target[0], target[1], target[2])
+      mesh.current.rotation.set(0, 0, 0)
+      return
+    }
+
     mesh.current.position.x = THREE.MathUtils.damp(mesh.current.position.x, target[0], 3.2, delta)
     mesh.current.position.z = THREE.MathUtils.damp(mesh.current.position.z, target[2], 3.2, delta)
 
@@ -214,40 +312,42 @@ function ClashPulse({ solved }: { solved: boolean }) {
 
 function TimetableScene({ solved }: { solved: boolean }) {
   return (
-    <Canvas camera={{ position: [7.6, 6.4, 8.1], fov: 31 }} dpr={[1, 1.6]} gl={{ antialias: true, alpha: true }}>
-      <ambientLight intensity={1.75} />
-      <directionalLight position={[4, 7, 4]} intensity={2.8} color="#d8edf7" />
-      <pointLight position={[-4, 3, 2]} intensity={7} color={mist} distance={8} />
-      <SceneParallax>
-        <GridPlate />
-        <TimetableTile day={0} time={0} label="OS" tone="mist" />
-        <TimetableTile day={1} time={1} label="DBMS" tone="pearl" />
-        {/* Wednesday 11:00 (slot 2) Clash Blocks */}
-        <TimetableTile day={2} time={2} label="OS" tone={solved ? 'mist' : 'ember'} />
-        <TimetableTile
-          day={2}
-          time={2}
-          label="NW"
-          tone={solved ? 'mist' : 'ember'}
-          targetDay={3}
-          targetTime={5} // Moves to Thursday 14:00 (Post-lunch, slot 5)
-          solved={solved}
+    <WebGLErrorBoundary>
+      <Canvas camera={{ position: [7.6, 6.4, 8.1], fov: 31 }} dpr={[1, 1.6]} gl={{ antialias: true, alpha: true }}>
+        <ambientLight intensity={1.75} />
+        <directionalLight position={[4, 7, 4]} intensity={2.8} color="#d8edf7" />
+        <pointLight position={[-4, 3, 2]} intensity={7} color={mist} distance={8} />
+        <SceneParallax>
+          <GridPlate />
+          <TimetableTile day={0} time={0} label="OS" tone="mist" />
+          <TimetableTile day={1} time={1} label="DBMS" tone="pearl" />
+          {/* Wednesday 11:00 (slot 2) Clash Blocks */}
+          <TimetableTile day={2} time={2} label="OS" tone={solved ? 'mist' : 'ember'} />
+          <TimetableTile
+            day={2}
+            time={2}
+            label="NW"
+            tone={solved ? 'mist' : 'ember'}
+            targetDay={3}
+            targetTime={5} // Moves to Thursday 14:00 (Post-lunch, slot 5)
+            solved={solved}
+          />
+          <TimetableTile day={4} time={0} label="SE" tone="pearl" />
+          <TimetableTile day={3} time={1} label="ALGO" tone="mist" />
+          <TimetableTile day={1} time={6} label="CN" tone="pearl" />
+          <ClashPulse solved={solved} />
+        </SceneParallax>
+        <OrbitControls
+          enablePan={false}
+          enableZoom={false}
+          minPolarAngle={1.04}
+          maxPolarAngle={1.56}
+          minAzimuthAngle={-0.55}
+          maxAzimuthAngle={0.55}
+          target={[0, 0, 0]}
         />
-        <TimetableTile day={4} time={0} label="SE" tone="pearl" />
-        <TimetableTile day={3} time={1} label="ALGO" tone="mist" />
-        <TimetableTile day={1} time={6} label="CN" tone="pearl" />
-        <ClashPulse solved={solved} />
-      </SceneParallax>
-      <OrbitControls
-        enablePan={false}
-        enableZoom={false}
-        minPolarAngle={1.04}
-        maxPolarAngle={1.56}
-        minAzimuthAngle={-0.55}
-        maxAzimuthAngle={0.55}
-        target={[0, 0, 0]}
-      />
-    </Canvas>
+      </Canvas>
+    </WebGLErrorBoundary>
   )
 }
 

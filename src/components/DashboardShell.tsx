@@ -274,6 +274,18 @@ export function AccessAuditPanel({
   )
 }
 
+// [M-23] Standalone leaf LiveClock component isolates 1-second state ticks from re-rendering the entire dashboard
+export function LiveClock() {
+  const [clock, setClock] = useState(() => formatClock(new Date()))
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setClock(formatClock(new Date()))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
+  return <span className="topbar-clock">{clock}</span>
+}
+
 export function DashboardShell({
   role,
   collegeName,
@@ -297,14 +309,6 @@ export function DashboardShell({
     setTheme(nextTheme)
     localStorage.setItem('schedulo_theme', nextTheme)
   }
-
-  const [clock, setClock] = useState(() => formatClock(new Date()))
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setClock(formatClock(new Date()))
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [])
 
   const navItems: Array<{ id: 'matrix' | 'alerts' | 'audit'; label: string; icon: typeof CalendarDays }> = [
     { id: 'matrix', label: 'Weekly Matrix', icon: CalendarDays },
@@ -389,13 +393,14 @@ export function DashboardShell({
                 className="theme-toggle-btn"
                 onClick={toggleTheme}
                 title={`Switch to ${theme === 'light' ? 'Deep Midnight Teal Dark' : 'Soft Pearl Light'} Mode`}
+                aria-label={`Switch to ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
               >
                 {theme === 'light' ? <Moon size={14} /> : <Sun size={14} />}
                 <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
               </button>
 
               <StatusPill tone="mist">2FA VERIFIED</StatusPill>
-              <span className="topbar-clock">{clock}</span>
+              <LiveClock />
 
               <div className="user-block">
                 <div className="user-avatar">{initials}</div>
@@ -411,6 +416,7 @@ export function DashboardShell({
               <button
                 className="text-link"
                 title="Sign out"
+                aria-label="Sign out"
                 onClick={() => {
                   clearStoredAuth()
                   navigate('/')

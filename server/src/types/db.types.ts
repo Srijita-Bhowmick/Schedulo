@@ -6,6 +6,7 @@ export interface UserRow {
   name: string;
   totp_secret: string;
   is_totp_verified: number;
+  last_totp_step: number | null;
   teacher_id: string | null;
   batch_id: string | null;
   department_id: string | null;

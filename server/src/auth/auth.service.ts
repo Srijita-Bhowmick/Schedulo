@@ -27,6 +27,7 @@ export interface UserRow {
   name: string;
   totp_secret: string;
   is_totp_verified: number;
+  last_totp_step?: number | null;
   teacher_id?: string | null;
   batch_id?: string | null;
   department_id?: string | null;
@@ -66,11 +67,20 @@ export class AuthService {
     });
   }
 
-  static verifyTotp(token: string, secret: string): boolean {
+  static verifyTotp(
+    token: string,
+    secret: string,
+    lastTotpStep = 0
+  ): { valid: boolean; step: number; replayed: boolean } {
+    const currentStep = Math.floor(Date.now() / 30000);
+    if (lastTotpStep && currentStep <= lastTotpStep) {
+      return { valid: false, step: currentStep, replayed: true };
+    }
     try {
-      return authenticator.check(token, secret);
+      const valid = authenticator.check(token, secret);
+      return { valid, step: currentStep, replayed: false };
     } catch {
-      return false;
+      return { valid: false, step: currentStep, replayed: false };
     }
   }
 

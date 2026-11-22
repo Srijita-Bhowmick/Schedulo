@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Download, FileDown, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, Download, FileDown, ShieldCheck } from 'lucide-react'
 import {
   ScheduleBlock,
   StudentDashboardData,
@@ -18,14 +18,56 @@ import {
 
 export function StudentDashboard() {
   const [data, setData] = useState<StudentDashboardData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [selectedBlock, setSelectedBlock] = useState<ScheduleBlock | null>(null)
   const [toast, setToast] = useState('')
 
+  const loadData = () => {
+    setLoading(true)
+    setError(null)
+    getStudentDashboard()
+      .then((res) => {
+        setData(res)
+        setLoading(false)
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : 'Unable to connect to Schedulo backend server.')
+        setLoading(false)
+      })
+  }
+
   useEffect(() => {
-    getStudentDashboard().then(setData)
+    loadData()
   }, [])
 
-  if (!data) return <LoadingDashboard />
+  if (error) {
+    return (
+      <div
+        className="error-fallback-container"
+        style={{
+          minHeight: '60vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 16,
+          color: 'var(--pearl)',
+          textAlign: 'center',
+          padding: 24,
+        }}
+      >
+        <AlertTriangle size={36} color="var(--ember)" />
+        <h3 style={{ fontSize: 18, margin: 0, fontFamily: 'Space Grotesk, sans-serif' }}>Connection Interrupted</h3>
+        <p style={{ maxWidth: 440, fontSize: 13, color: '#C7E3F7', margin: 0 }}>{error}</p>
+        <Button tone="mist" size="md" onClick={loadData}>
+          Retry Connection
+        </Button>
+      </div>
+    )
+  }
+
+  if (loading || !data) return <LoadingDashboard />
 
   const exportPDF = () => {
     window.print()
@@ -40,7 +82,8 @@ export function StudentDashboard() {
     const csvContent = [headers.map(escapeCsv).join(','), ...rows.map((row) => row.map(escapeCsv).join(','))].join(
       '\r\n'
     )
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    // [M-28] Prepend UTF-8 BOM (\uFEFF) so Excel/Spreadsheets render non-ASCII characters cleanly
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.setAttribute('href', url)

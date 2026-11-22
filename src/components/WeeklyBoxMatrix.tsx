@@ -6,6 +6,8 @@ import { Badge, cn } from './ui'
 export interface WeeklyBoxMatrixProps {
   blocks: ScheduleBlock[]
   mode: 'student' | 'teacher' | 'admin'
+  days?: string[]
+  periods?: TimePeriod[]
   unavailableSlots?: string[] // e.g. ['Mon-09:00', 'Wed-14:00']
   onToggleSlot?: (day: string, time: string) => void
   onSelectBlock?: (block: ScheduleBlock) => void
@@ -20,6 +22,8 @@ export const DAY_NAMES: Record<string, string> = {
   Wed: 'Wednesday',
   Thu: 'Thursday',
   Fri: 'Friday',
+  Sat: 'Saturday',
+  Sun: 'Sunday',
 }
 
 export interface TimePeriod {
@@ -43,29 +47,37 @@ export const TIME_PERIODS: TimePeriod[] = [
 export function WeeklyBoxMatrix({
   blocks,
   mode,
+  days = DAYS as unknown as string[],
+  periods = TIME_PERIODS,
   unavailableSlots = [],
   onToggleSlot,
   onSelectBlock,
   activeSlot = { day: 'Wed', time: '11:00' },
   secondaryLabel = 'faculty',
 }: WeeklyBoxMatrixProps) {
+  const activeDays = days && days.length > 0 ? days : (DAYS as unknown as string[])
+  const activePeriods = periods && periods.length > 0 ? periods : TIME_PERIODS
+
   return (
     <div className="box-matrix-wrap">
-      <div className="box-matrix-grid">
-        {/* Header Row: Corner Cell + 5 Day Headers */}
+      <div
+        className="box-matrix-grid"
+        style={{ '--matrix-days-count': activeDays.length } as React.CSSProperties}
+      >
+        {/* Header Row: Corner Cell + Dynamic Day Headers */}
         <div className="box-matrix-corner-head">
           <Clock size={12} className="inline mr-1 text-mist" />
           <span>SLOT</span>
         </div>
-        {DAYS.map((day) => (
+        {activeDays.map((day) => (
           <div key={day} className="box-matrix-day-head">
             <span className="day-abbr">{day.toUpperCase()}</span>
-            <span className="day-full">{DAY_NAMES[day]}</span>
+            <span className="day-full">{DAY_NAMES[day] || day}</span>
           </div>
         ))}
 
-        {/* Rows: Time Period Cell + 5 Day Slots */}
-        {TIME_PERIODS.map(({ id: time, label, end, period, isLunch }) => (
+        {/* Rows: Time Period Cell + Dynamic Day Slots */}
+        {activePeriods.map(({ id: time, label, end, period, isLunch }) => (
           <React.Fragment key={time}>
             {/* Time Slot Column Cell */}
             <div className={cn('box-matrix-time-cell', isLunch && 'box-matrix-time-cell--lunch')}>
@@ -74,9 +86,9 @@ export function WeeklyBoxMatrix({
               <span className="time-end">{end}</span>
             </div>
 
-            {/* If Lunch Recess: Render Locked Lunch Band Across All 5 Days */}
+            {/* If Lunch Recess: Render Locked Lunch Band Across All Active Days */}
             {isLunch ? (
-              DAYS.map((day) => (
+              activeDays.map((day) => (
                 <div key={`${day}-lunch`} className="box-tile box-tile--lunch" title="13:00 - 14:00 Campus Lunch Break">
                   <div className="lunch-badge">
                     <Lock size={10} />
@@ -86,8 +98,8 @@ export function WeeklyBoxMatrix({
                 </div>
               ))
             ) : (
-              /* Regular Period: 5 Day Slot Cells */
-              DAYS.map((day) => {
+              /* Regular Period: Dynamic Day Slot Cells */
+              activeDays.map((day) => {
                 const key = `${day}-${time}`
                 const isBlocked = unavailableSlots.includes(key)
                 const block = blocks.find((b) => b.day === day && b.start === time)
@@ -104,6 +116,7 @@ export function WeeklyBoxMatrix({
                       onClick={() => onToggleSlot?.(day, time)}
                       className="box-tile box-tile--blocked"
                       title={`Click to unblock ${day} ${label}`}
+                      aria-label={`Unblock ${day} ${label}`}
                     >
                       <div className="blocked-badge">
                         <Lock size={10} />
@@ -129,17 +142,23 @@ export function WeeklyBoxMatrix({
                       role="button"
                       tabIndex={0}
                       onClick={() => onSelectBlock?.(block)}
-                      onKeyDown={(e) => e.key === 'Enter' && onSelectBlock?.(block)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          onSelectBlock?.(block)
+                        }
+                      }}
                       className={cn(
                         'box-tile box-tile--class',
                         isLive && 'box-tile--live',
                         isClash && 'box-tile--clash'
                       )}
                       title={`Click to view details for ${block.code} ${block.subject}`}
+                      aria-label={`Class ${block.code}: ${block.subject}, ${block.room}, ${block.faculty}`}
                     >
                       {/* Top line: Subject code + Room badge + Optional Dept badge */}
                       <div className="box-tile__top">
-                        <span className="box-tile__code">{block.code}</span>
+                        <span className="box-tile__code" title={block.subject}>{block.code}</span>
                         <div className="flex items-center gap-1">
                           {block.department && (
                             <span className="box-tile__dept" title={`Department: ${block.department}`}>
@@ -175,22 +194,32 @@ export function WeeklyBoxMatrix({
                   )
                 }
 
-                // 3. Empty / Free Slot Box
+                // 3. Empty / Free Slot Box: Plain <div> for student/admin, <button> for teacher [M-33]
+                if (mode === 'teacher') {
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => onToggleSlot?.(day, time)}
+                      className="box-tile box-tile--empty cursor-pointer hover:border-mist"
+                      title={`Click to block ${day} ${label}`}
+                      aria-label={`Block slot for ${day} ${label}`}
+                    >
+                      <span className="empty-label">+ Open</span>
+                      <span className="empty-subtext">Click to block</span>
+                    </button>
+                  )
+                }
+
                 return (
-                  <button
+                  <div
                     key={key}
-                    type="button"
-                    onClick={() => {
-                      if (mode === 'teacher') {
-                        onToggleSlot?.(day, time)
-                      }
-                    }}
-                    className={cn('box-tile box-tile--empty', mode === 'teacher' && 'cursor-pointer hover:border-mist')}
-                    title={mode === 'teacher' ? `Click to block ${day} ${label}` : `${day} ${label} is an open free hour`}
+                    className="box-tile box-tile--empty"
+                    title={`${day} ${label} is an open free hour`}
+                    aria-label={`Free slot on ${day} ${label}`}
                   >
-                    <span className="empty-label">{mode === 'teacher' ? '+ Open' : '— Free —'}</span>
-                    {mode === 'teacher' && <span className="empty-subtext">Click to block</span>}
-                  </button>
+                    <span className="empty-label">— Free —</span>
+                  </div>
                 )
               })
             )}

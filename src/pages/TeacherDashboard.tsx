@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { RefreshCw, Settings2 } from 'lucide-react'
+import { AlertTriangle, RefreshCw, Settings2 } from 'lucide-react'
 import {
   ScheduleBlock,
   TeacherDashboardData,
@@ -17,6 +17,8 @@ import { DashboardHeader, DashboardShell, LoadingDashboard } from '../components
 
 export function TeacherDashboard() {
   const [data, setData] = useState<TeacherDashboardData | null>(null)
+  const [loadingData, setLoadingData] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [unavailable, setUnavailable] = useState<string[]>([])
   const [modalOpen, setModalOpen] = useState(false)
   const [selectedBlock, setSelectedBlock] = useState<ScheduleBlock | null>(null)
@@ -27,14 +29,59 @@ export function TeacherDashboard() {
   const [loading, setLoading] = useState(false)
   const [toast, setToast] = useState('')
 
+  const loadData = () => {
+    setLoadingData(true)
+    setError(null)
+    getTeacherDashboard()
+      .then((result) => {
+        setData(result)
+        setUnavailable(result.unavailable)
+        setLoadingData(false)
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : 'Unable to connect to Schedulo backend server.')
+        setLoadingData(false)
+      })
+  }
+
   useEffect(() => {
-    getTeacherDashboard().then((result) => {
-      setData(result)
-      setUnavailable(result.unavailable)
-    })
+    loadData()
   }, [])
 
-  if (!data) return <LoadingDashboard />
+  if (error) {
+    return (
+      <div
+        className="error-fallback-container"
+        style={{
+          minHeight: '60vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 16,
+          color: 'var(--pearl)',
+          textAlign: 'center',
+          padding: 24,
+        }}
+      >
+        <AlertTriangle size={36} color="var(--ember)" />
+        <h3 style={{ fontSize: 18, margin: 0, fontFamily: 'Space Grotesk, sans-serif' }}>Connection Interrupted</h3>
+        <p style={{ maxWidth: 440, fontSize: 13, color: '#C7E3F7', margin: 0 }}>{error}</p>
+        <Button tone="mist" size="md" onClick={loadData}>
+          Retry Connection
+        </Button>
+      </div>
+    )
+  }
+
+  if (loadingData || !data) return <LoadingDashboard />
+
+  const closeModal = () => {
+    // [M-20] Cleanly reset validation state when modal closes
+    setModalOpen(false)
+    setValidation('')
+    setSelectedBlock(null)
+  }
 
   const toggleSlot = async (day: string, time: string) => {
     const key = `${day}-${time}`
@@ -198,7 +245,7 @@ export function TeacherDashboard() {
             loading={loading}
             onValidate={validate}
             onConfirm={confirmReschedule}
-            onClose={() => setModalOpen(false)}
+            onClose={closeModal}
           />
         )}
 

@@ -78,6 +78,17 @@ export class EntityController {
   static createTeacher(req: AuthenticatedRequest, res: Response): void {
     try {
       const { name, shortCode, email, department, departmentId, maxHoursPerDay, maxHoursPerWeek, unavailableSlots, color } = req.body;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Faculty name is required and must be a non-empty string' });
+        return;
+      }
+      const safeName = name.trim();
+      const safeShortCode = (shortCode && typeof shortCode === 'string' && shortCode.trim())
+        ? shortCode.trim().toUpperCase()
+        : safeName.slice(0, 3).toUpperCase();
+      const safeMaxHoursDay = Math.max(1, Math.min(parseInt(String(maxHoursPerDay), 10) || 4, 12));
+      const safeMaxHoursWeek = Math.max(1, Math.min(parseInt(String(maxHoursPerWeek), 10) || 16, 40));
+
       const adminDeptId = req.user?.departmentId;
       const targetDeptId = departmentId || adminDeptId;
       if (req.user?.role === 'ADMIN' && adminDeptId && targetDeptId && adminDeptId !== targetDeptId) {
@@ -90,12 +101,12 @@ export class EntityController {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
-        name,
-        shortCode || name.slice(0, 3).toUpperCase(),
-        email || null,
+        safeName,
+        safeShortCode,
+        (email && typeof email === 'string' && email.trim()) ? email.trim() : null,
         department || 'Computer Science & Engineering',
-        maxHoursPerDay || 4,
-        maxHoursPerWeek || 16,
+        safeMaxHoursDay,
+        safeMaxHoursWeek,
         JSON.stringify(unavailableSlots || []),
         color || '#6366f1'
       );
@@ -104,7 +115,7 @@ export class EntityController {
         db.prepare('INSERT OR REPLACE INTO teacher_departments (teacher_id, department_id, is_primary) VALUES (?, ?, 1)').run(id, departmentId);
       }
 
-      res.status(201).json({ id, name, shortCode, email, department, maxHoursPerDay, maxHoursPerWeek, unavailableSlots, color });
+      res.status(201).json({ id, name: safeName, shortCode: safeShortCode, email, department, maxHoursPerDay: safeMaxHoursDay, maxHoursPerWeek: safeMaxHoursWeek, unavailableSlots, color });
     } catch (err: unknown) {
       res.status(500).json({ error: (err as Error).message || 'Error creating teacher' });
     }
@@ -190,6 +201,13 @@ export class EntityController {
   static createRoom(req: AuthenticatedRequest, res: Response): void {
     try {
       const { roomNumber, name, type, capacity, building, departmentId, isShared } = req.body;
+      if (!roomNumber || typeof roomNumber !== 'string' || !roomNumber.trim()) {
+        res.status(400).json({ error: 'Room number is required and must be a non-empty string' });
+        return;
+      }
+      const safeRoomNumber = roomNumber.trim();
+      const safeCapacity = Math.max(1, Math.min(parseInt(String(capacity), 10) || 60, 500));
+
       const adminDeptId = req.user?.departmentId;
       if (req.user?.role === 'ADMIN' && adminDeptId && departmentId && adminDeptId !== departmentId) {
         res.status(403).json({ error: 'Cannot create room for another department' });
@@ -201,15 +219,15 @@ export class EntityController {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
-        roomNumber,
-        name || null,
+        safeRoomNumber,
+        (name && typeof name === 'string' && name.trim()) ? name.trim() : null,
         type || 'LECTURE_HALL',
-        capacity || 60,
+        safeCapacity,
         building || 'Academic Block',
         departmentId || null,
         isShared ? 1 : 0
       );
-      res.status(201).json({ id, roomNumber, name, type, capacity, building, departmentId, isShared });
+      res.status(201).json({ id, roomNumber: safeRoomNumber, name, type, capacity: safeCapacity, building, departmentId, isShared });
     } catch (err: unknown) {
       res.status(500).json({ error: (err as Error).message || 'Error creating room' });
     }
@@ -270,6 +288,15 @@ export class EntityController {
   static createSubject(req: AuthenticatedRequest, res: Response): void {
     try {
       const { code, name, type, weeklyHours, durationSlots, assignedTeacherId, departmentId, preferredRoomType, allowTwoHourBlock, isDoubleBlock, color } = req.body;
+      if (!code || typeof code !== 'string' || !code.trim() || !name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Subject code and name are required non-empty strings' });
+        return;
+      }
+      const safeCode = code.trim().toUpperCase();
+      const safeName = name.trim();
+      const safeWeeklyHours = Math.max(1, Math.min(parseInt(String(weeklyHours), 10) || 3, 20));
+      const safeDurationSlots = Math.max(1, Math.min(parseInt(String(durationSlots), 10) || 1, 4));
+
       const adminDeptId = req.user?.departmentId;
       if (req.user?.role === 'ADMIN' && adminDeptId && departmentId && adminDeptId !== departmentId) {
         res.status(403).json({ error: 'Cannot create subject for another department' });
@@ -282,11 +309,11 @@ export class EntityController {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
-        code,
-        name,
+        safeCode,
+        safeName,
         type || 'THEORY',
-        weeklyHours || 3,
-        durationSlots || 1,
+        safeWeeklyHours,
+        safeDurationSlots,
         assignedTeacherId,
         departmentId || null,
         preferredRoomType || 'LECTURE_HALL',
@@ -294,7 +321,7 @@ export class EntityController {
         hasDoubleBlock,
         color || '#6366f1'
       );
-      res.status(201).json({ id, code, name, type, weeklyHours, durationSlots, assignedTeacherId, departmentId, preferredRoomType, allowTwoHourBlock: Boolean(hasDoubleBlock), isDoubleBlock: Boolean(hasDoubleBlock), color });
+      res.status(201).json({ id, code: safeCode, name: safeName, type, weeklyHours: safeWeeklyHours, durationSlots: safeDurationSlots, assignedTeacherId, departmentId, preferredRoomType, allowTwoHourBlock: Boolean(hasDoubleBlock), isDoubleBlock: Boolean(hasDoubleBlock), color });
     } catch (err: unknown) {
       res.status(500).json({ error: (err as Error).message || 'Error creating subject' });
     }
@@ -360,6 +387,14 @@ export class EntityController {
   static createBatch(req: AuthenticatedRequest, res: Response): void {
     try {
       const { name, department, departmentId, semester, section, studentCount, subjectIds } = req.body;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Batch name is required and must be a non-empty string' });
+        return;
+      }
+      const safeName = name.trim();
+      const safeSemester = Math.max(1, Math.min(parseInt(String(semester), 10) || 1, 12));
+      const safeStudents = Math.max(1, Math.min(parseInt(String(studentCount), 10) || 60, 500));
+
       const adminDeptId = req.user?.departmentId;
       if (req.user?.role === 'ADMIN' && adminDeptId && departmentId && adminDeptId !== departmentId) {
         res.status(403).json({ error: 'Cannot create batch for another department' });
@@ -371,15 +406,15 @@ export class EntityController {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
-        name,
+        safeName,
         department || 'Computer Science & Engineering',
         departmentId || null,
-        semester || 1,
+        safeSemester,
         section || 'A',
-        studentCount || 60,
+        safeStudents,
         JSON.stringify(subjectIds || [])
       );
-      res.status(201).json({ id, name, department, departmentId, semester, section, studentCount, subjectIds });
+      res.status(201).json({ id, name: safeName, department, departmentId, semester: safeSemester, section: section || 'A', studentCount: safeStudents, subjectIds: subjectIds || [] });
     } catch (err: unknown) {
       res.status(500).json({ error: (err as Error).message || 'Error creating batch' });
     }

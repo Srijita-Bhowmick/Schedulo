@@ -1061,7 +1061,7 @@ button { cursor: pointer; }
 
 .box-matrix-grid {
   display: grid;
-  grid-template-columns: 74px repeat(5, minmax(0, 1fr));
+  grid-template-columns: 74px repeat(var(--matrix-days-count, 5), minmax(0, 1fr));
   gap: 10px;
   width: 100%;
   min-width: 720px;

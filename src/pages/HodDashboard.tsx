@@ -43,6 +43,9 @@ import { DashboardHeader, DashboardShell, LoadingDashboard } from '../components
 
 export function HodDashboard() {
   const [data, setData] = useState<HodDashboardData | null>(null)
+  const [loadingData, setLoadingData] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [publishing, setPublishing] = useState(false)
   const [tab, setTab] = useState<'Settings' | 'Rooms' | 'Faculty' | 'Batches' | 'Subjects'>('Settings')
   const [solving, setSolving] = useState(false)
   const [solver, setSolver] = useState<SolverResult | null>(null)
@@ -62,17 +65,51 @@ export function HodDashboard() {
   const [toast, setToast] = useState('')
 
   const fetchDashboardData = () => {
-    getHodDashboard().then((res) => {
-      setData(res)
-      setCollegeNameInput(res.collegeName)
-    })
+    setLoadingData(true)
+    setError(null)
+    getHodDashboard()
+      .then((res) => {
+        setData(res)
+        setCollegeNameInput(res.collegeName)
+        setLoadingData(false)
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : 'Unable to connect to Schedulo backend server.')
+        setLoadingData(false)
+      })
   }
 
   useEffect(() => {
     fetchDashboardData()
   }, [])
 
-  if (!data) return <LoadingDashboard />
+  if (error) {
+    return (
+      <div
+        className="error-fallback-container"
+        style={{
+          minHeight: '60vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 16,
+          color: 'var(--pearl)',
+          textAlign: 'center',
+          padding: 24,
+        }}
+      >
+        <AlertTriangle size={36} color="var(--ember)" />
+        <h3 style={{ fontSize: 18, margin: 0, fontFamily: 'Space Grotesk, sans-serif' }}>Connection Interrupted</h3>
+        <p style={{ maxWidth: 440, fontSize: 13, color: '#C7E3F7', margin: 0 }}>{error}</p>
+        <Button tone="mist" size="md" onClick={fetchDashboardData}>
+          Retry Connection
+        </Button>
+      </div>
+    )
+  }
+
+  if (loadingData || !data) return <LoadingDashboard />
 
   const runSolver = async () => {
     setSolving(true)
@@ -84,8 +121,19 @@ export function HodDashboard() {
   }
 
   const publish = async () => {
-    const result = await publishTimetable()
-    setPublished(`${result.publishedAt} · ${result.recipients} recipients notified`)
+    // [M-15] Prevent duplicate submissions & indicate locked publication state
+    setPublishing(true)
+    try {
+      const result = await publishTimetable()
+      setPublished(`${result.publishedAt} · ${result.recipients} recipients notified`)
+      setToast('Timetable published to college. Shared faculty and lecture hall intervals locked.')
+      fetchDashboardData()
+    } catch (err: unknown) {
+      setToast(err instanceof Error ? err.message : 'Failed to publish timetable')
+    } finally {
+      setPublishing(false)
+      setTimeout(() => setToast(''), 4000)
+    }
   }
 
   const copyJoinCode = () => {
@@ -327,7 +375,7 @@ export function HodDashboard() {
                     <span className="detail-label">FACULTY JOIN CODE</span>
                     <div className="join-code-badge">
                       <span>{data.facultyJoinCode}</span>
-                      <button className="join-code-copy" onClick={copyJoinCode} title="Copy Faculty Join Code">
+                      <button className="join-code-copy" onClick={copyJoinCode} title="Copy Faculty Join Code" aria-label="Copy Faculty Join Code">
                         {copiedCode ? <Check size={14} color="#90C2E7" /> : <Copy size={14} />}
                       </button>
                     </div>
@@ -429,6 +477,7 @@ export function HodDashboard() {
                               type="button"
                               className="action-delete-btn"
                               title={`Delete ${r.roomNumber}`}
+                              aria-label={`Delete ${r.roomNumber}`}
                               onClick={() => handleDeleteRoom(r.id, r.roomNumber)}
                             >
                               <Trash2 size={13} />
@@ -502,6 +551,7 @@ export function HodDashboard() {
                               type="button"
                               className="action-delete-btn"
                               title={`Delete ${f.name}`}
+                              aria-label={`Delete ${f.name}`}
                               onClick={() => handleDeleteFaculty(f.id, f.name)}
                             >
                               <Trash2 size={13} />
@@ -562,6 +612,7 @@ export function HodDashboard() {
                               type="button"
                               className="action-delete-btn"
                               title={`Delete ${b.name}`}
+                              aria-label={`Delete ${b.name}`}
                               onClick={() => handleDeleteBatch(b.id, b.name)}
                             >
                               <Trash2 size={13} />
@@ -631,6 +682,7 @@ export function HodDashboard() {
                               type="button"
                               className="action-delete-btn"
                               title={`Delete ${s.name}`}
+                              aria-label={`Delete ${s.name}`}
                               onClick={() => handleDeleteSubject(s.id, s.name)}
                             >
                               <Trash2 size={13} />
@@ -650,7 +702,7 @@ export function HodDashboard() {
                 Push the verified timetable to Student and Faculty views. Shared faculty and rooms are locked
                 college-wide.
               </p>
-              <Button tone="mist" icon={Send} onClick={publish}>
+              <Button tone="mist" icon={Send} loading={publishing} disabled={publishing} onClick={publish}>
                 Publish Live Timetable
               </Button>
               {published && (

@@ -1,5 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { seedDatabase } from './db/seeder.js';
 import { db } from './db/db.js';
@@ -9,7 +11,6 @@ import teacherRoutes from './routes/teacher.routes.js';
 import scheduleRoutes from './routes/schedule.routes.js';
 import entityRoutes from './routes/entity.routes.js';
 import alertRoutes from './routes/alert.routes.js';
-import { authenticator } from 'otplib';
 import { authenticateToken, requireRole } from './auth/auth.middleware.js';
 
 dotenv.config();
@@ -17,17 +18,43 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// CORS configuration for seamless Vite frontend connection
+// [M-7] HTTP Security Headers
+app.use(helmet({ contentSecurityPolicy: false }));
+
+// [M-27] Dynamic CORS allowlist supporting local dev and deployed client origins
+const localOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://localhost:4173'];
+const clientOrigins = process.env.CLIENT_ORIGIN
+  ? process.env.CLIENT_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
+  : [];
+const allowedOrigins = [...localOrigins, ...clientOrigins];
+
 app.use(
   cors({
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://localhost:4173'],
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS blocked for origin: ${origin}`));
+      }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
 
-app.use(express.json());
+// [M-7] Limit JSON request body size to prevent DoS memory exhaustion
+app.use(express.json({ limit: '10kb' }));
+
+// [M-2] Global Rate Limiter: 200 req / minute
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+});
+app.use(globalLimiter);
 
 // Initialize Database & Run Seed
 seedDatabase();

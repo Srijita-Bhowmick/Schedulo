@@ -1,15 +1,7 @@
 import { Request, Response } from 'express';
 import { db } from '../db/db.js';
 import { ScheduleEntryData } from '../engine/SchedulingEngine.js';
-
-function getCurrentWeekId(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const firstDayOfYear = new Date(year, 0, 1);
-  const pastDaysOfYear = (now.getTime() - firstDayOfYear.getTime()) / 86400000;
-  const weekNum = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
-  return `${year}-W${weekNum.toString().padStart(2, '0')}`;
-}
+import { getCurrentIsoWeekIST } from '../utils/date.js';
 
 export class ScheduleController {
   static getSchedule(req: Request, res: Response): void {
@@ -32,7 +24,7 @@ export class ScheduleController {
       `).all() as any[];
 
       // Fetch active weekly overrides for this week to reflect live reschedules
-      const currentWeek = getCurrentWeekId();
+      const currentWeek = getCurrentIsoWeekIST();
       let activeOverrides: any[] = [];
       try {
         activeOverrides = db.prepare('SELECT * FROM reschedule_overrides WHERE valid_for_week = ?').all(currentWeek) as any[];

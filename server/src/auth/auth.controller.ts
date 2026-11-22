@@ -33,6 +33,15 @@ export class AuthController {
         return;
       }
 
+      // [M-6] Password Policy: Enforce minimum 8 characters with at least 1 letter and 1 number
+      const PASSWORD_REGEX = /^(?=.*[A-Za-z])(?=.*\d).{8,}$/;
+      if (!PASSWORD_REGEX.test(password)) {
+        res.status(400).json({
+          error: 'Password must be at least 8 characters long and contain both letters and numbers',
+        });
+        return;
+      }
+
       const rawRole = (role || 'STUDENT').toString().toUpperCase();
       const userRole = (rawRole === 'HOD' || rawRole === 'ADMIN') ? 'ADMIN' : (rawRole === 'TEACHER' ? 'TEACHER' : 'STUDENT');
 
@@ -155,14 +164,7 @@ export class AuthController {
         now
       );
 
-      // Log dev-mode TOTP in terminal only for local testing
-      if (is2faMandatory) {
-        const devTotp = authenticator.generate(secret);
-        console.log(`\n======================================================`);
-        console.log(`[AUTH-2FA-TERMINAL] Registered User: ${email} (${userRole})`);
-        console.log(`[AUTH-2FA-TERMINAL] Local Test Code: >>> ${devTotp} <<<`);
-        console.log(`======================================================\n`);
-      }
+
 
       // If Student opted out of 2FA, issue full token immediately
       if (!is2faMandatory) {
@@ -213,18 +215,24 @@ export class AuthController {
 
       const user = AuthService.getUserByEmail(email);
       if (!user) {
-        res.status(404).json({ error: 'User not found' });
+        // [M-4] Stop User Enumeration: Return generic 400 whether user exists or not
+        res.status(400).json({ error: 'Invalid verification request' });
         return;
       }
 
-      const isValid = AuthService.verifyTotp(totpCode.trim(), user.totp_secret);
-      if (!isValid) {
-        res.status(400).json({ error: 'Invalid 6-digit verification code. Please check your authenticator app.' });
+      // [M-1] TOTP Replay Protection: Reject reuse within same 30s timestep
+      const verifyResult = AuthService.verifyTotp(totpCode.trim(), user.totp_secret, user.last_totp_step || 0);
+      if (!verifyResult.valid) {
+        res.status(400).json({
+          error: verifyResult.replayed
+            ? 'TOTP code already used. Please wait for the next rotating window.'
+            : 'Invalid verification request',
+        });
         return;
       }
 
-      // Activate user
-      db.prepare('UPDATE users SET is_totp_verified = 1 WHERE id = ?').run(user.id);
+      // Activate user and record last_totp_step
+      db.prepare('UPDATE users SET is_totp_verified = 1, last_totp_step = ? WHERE id = ?').run(verifyResult.step, user.id);
 
       const payload: UserPayload = {
         id: user.id,
@@ -312,12 +320,7 @@ export class AuthController {
       // Issue temporary Pre-2FA token (expires in 5 minutes)
       const pre2faToken = AuthService.signPre2faToken(user.id, user.email);
 
-      // Log dev-mode TOTP code in terminal only for local testing
-      const devTotp = authenticator.generate(user.totp_secret);
-      console.log(`\n======================================================`);
-      console.log(`[AUTH-2FA-TERMINAL] Login User: ${user.email} (${user.role})`);
-      console.log(`[AUTH-2FA-TERMINAL] Local Test Code: >>> ${devTotp} <<<`);
-      console.log(`======================================================\n`);
+
 
       res.json({
         message: 'Primary credentials verified. Please enter the 6-digit TOTP code from your Authenticator app.',
@@ -355,11 +358,19 @@ export class AuthController {
         return;
       }
 
-      const isValid = AuthService.verifyTotp(totpCode.trim(), user.totp_secret);
-      if (!isValid) {
-        res.status(400).json({ error: 'Invalid 6-digit TOTP code. Please check your authenticator app.' });
+      // [M-1] TOTP Replay Protection: Reject reuse within same 30s timestep
+      const verifyResult = AuthService.verifyTotp(totpCode.trim(), user.totp_secret, user.last_totp_step || 0);
+      if (!verifyResult.valid) {
+        res.status(401).json({
+          error: verifyResult.replayed
+            ? 'TOTP code has already been used. Please wait for the next rotating window.'
+            : 'Invalid 6-digit TOTP code. Please check your authenticator app.',
+        });
         return;
       }
+
+      // Record successful step to prevent replay attacks
+      db.prepare('UPDATE users SET last_totp_step = ? WHERE id = ?').run(verifyResult.step, user.id);
 
       const payload: UserPayload = {
         id: user.id,

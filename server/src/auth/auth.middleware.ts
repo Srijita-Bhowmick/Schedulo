@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { AuthService, UserPayload } from './auth.service.js';
+import { db } from '../db/db.js';
 
 export interface AuthenticatedRequest extends Request {
   user?: UserPayload;
@@ -22,6 +23,12 @@ export function authenticateToken(
 
   try {
     const user = AuthService.verifyAuthToken(token);
+    // [M-5] Prevent Stale Revoked Sessions: verify user still exists in SQLite
+    const dbUser = db.prepare('SELECT id, role, department_id FROM users WHERE id = ?').get(user.id);
+    if (!dbUser) {
+      res.status(401).json({ error: 'Unauthorized: User account no longer exists' });
+      return;
+    }
     req.user = user;
     next();
   } catch (err) {

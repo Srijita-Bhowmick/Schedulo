@@ -141,7 +141,8 @@ export const ROLE_META: Record<Role, RoleMeta> = {
   admin: { label: 'Head of Department', shortLabel: 'HOD', route: '/dashboard/hod', initials: 'HD' },
 }
 
-const API_BASE = '/api'
+// [M-29] Dynamic API base supporting VITE_API_BASE_URL for GitHub Pages and production backends
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || '/api'
 let activeAuthSession: AuthSession | null = null
 
 export function getStoredToken(): string | null {
@@ -151,6 +152,8 @@ export function getStoredToken(): string | null {
     return null
   }
 }
+
+export const getStoredAuthToken = getStoredToken
 
 export function getStoredUser(): any | null {
   try {
@@ -210,6 +213,70 @@ export const fallbackAlerts: LiveAlert[] = [
   { id: 'alert-1', kind: 'room', title: 'Room change · CS501', detail: 'Operating Systems relocated to Room 101 (Academic Block 1).', time: '09:30' },
   { id: 'alert-2', kind: 'rescheduled', title: 'Deterministic Solver Verified', detail: 'Backtracking Solver (MRV) validated campus schedule with 0 clashes.', time: 'Today' },
 ]
+
+// [M-19] Deterministic minute-accurate "Happening Now" and "Up Next" calculation
+export function computeLiveScheduleStatus(blocks: ScheduleBlock[]): {
+  current: ScheduleBlock
+  next: ScheduleBlock
+  blocksWithStatus: ScheduleBlock[]
+} {
+  const now = new Date()
+  const dayNamesShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const currentDay = dayNamesShort[now.getDay()]
+  const currentMinutes = now.getHours() * 60 + now.getMinutes()
+
+  const blocksWithStatus: ScheduleBlock[] = blocks.map((b) => {
+    const [startH, startM] = (b.start || '09:00').split(':').map((v) => parseInt(v, 10))
+    const [endH, endM] = (b.end || '10:00').split(':').map((v) => parseInt(v, 10))
+    const startMin = startH * 60 + (startM || 0)
+    const endMin = endH * 60 + (endM || 0)
+
+    if (b.day === currentDay) {
+      if (currentMinutes >= startMin && currentMinutes < endMin) {
+        return { ...b, status: 'live' as const }
+      }
+      if (currentMinutes < startMin) {
+        return { ...b, status: 'upcoming' as const }
+      }
+      return { ...b, status: 'free' as const }
+    }
+    return { ...b, status: 'upcoming' as const }
+  })
+
+  // Determine current class
+  let current = blocksWithStatus.find((b) => b.status === 'live')
+  if (!current) {
+    if (currentMinutes >= 780 && currentMinutes < 840) {
+      current = {
+        id: 'lunch-recess-now',
+        code: 'RECESS',
+        subject: 'Institutional Lunch Break',
+        faculty: 'Campus-wide Locked Recess',
+        room: 'Dining Commons / Hall',
+        batch: 'All Batches',
+        day: currentDay,
+        start: '13:00',
+        end: '14:00',
+        status: 'live',
+      }
+    } else {
+      current =
+        blocksWithStatus.find((b) => b.day === currentDay && b.status === 'upcoming') ||
+        blocksWithStatus[0] ||
+        fallbackWeeklyBlocks[0]
+    }
+  }
+
+  // Determine next class
+  let next = blocksWithStatus.find(
+    (b) => b.id !== current?.id && b.day === currentDay && b.status === 'upcoming'
+  )
+  if (!next) {
+    next = blocksWithStatus.find((b) => b.id !== current?.id) || blocksWithStatus[1] || fallbackWeeklyBlocks[1]
+  }
+
+  return { current, next, blocksWithStatus }
+}
 
 export async function getDepartments(): Promise<{ collegeName: string; departments: DepartmentData[] }> {
   try {
@@ -447,14 +514,16 @@ export async function getStudentDashboard(): Promise<StudentDashboardData> {
       time: new Date(a.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     }))
 
+    const { current, next, blocksWithStatus } = computeLiveScheduleStatus(finalBlocks)
+
     return {
       role: 'student',
       activeBatch: activeBatchName,
       collegeName: deptData.collegeName || 'Apex Institute of Technology & Science',
       department: userDept,
-      current: finalBlocks.find((b) => b.status === 'live') || finalBlocks[0] || fallbackWeeklyBlocks[0],
-      next: finalBlocks[1] || fallbackWeeklyBlocks[1],
-      blocks: finalBlocks,
+      current,
+      next,
+      blocks: blocksWithStatus,
       alerts: mappedAlerts.length > 0 ? mappedAlerts : fallbackAlerts,
       updatedAt: `${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} · Live`,
     }

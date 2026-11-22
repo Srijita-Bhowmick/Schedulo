@@ -180,11 +180,15 @@ export function ShareFacultyModal({
           value={shareTeacherId}
           onChange={(e) => setShareTeacherId(e.target.value)}
         >
-          {faculty.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.name} ({f.shortCode})
-            </option>
-          ))}
+          {faculty.length === 0 ? (
+            <option value="" disabled>No faculty registered — add a faculty member first</option>
+          ) : (
+            faculty.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name} ({f.shortCode})
+              </option>
+            ))
+          )}
         </SelectField>
         <SelectField
           label="TARGET DEPARTMENT TO SHARE WITH"
@@ -352,11 +356,15 @@ export function AddSubjectModal({
             value={newSubjectTeacherId}
             onChange={(e) => setNewSubjectTeacherId(e.target.value)}
           >
-            {faculty.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name} ({f.shortCode})
-              </option>
-            ))}
+            {faculty.length === 0 ? (
+              <option value="" disabled>No faculty registered — add a faculty member first</option>
+            ) : (
+              faculty.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name} ({f.shortCode})
+                </option>
+              ))
+            )}
           </SelectField>
         </div>
         <label

@@ -85,6 +85,26 @@ export function AuthPage() {
   const updateOtp = (index: number, value: string) =>
     setOtp((items) => items.map((item, itemIndex) => (itemIndex === index ? value.slice(-1) : item)))
 
+  // [M-18] OTP Clipboard Paste Handler
+  const handlePaste = (e: React.ClipboardEvent) => {
+    e.preventDefault()
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
+    if (!pasted) return
+    const digits = pasted.split('')
+    setOtp((prev) => {
+      const next = [...prev]
+      digits.forEach((d, i) => {
+        if (i < 6) next[i] = d
+      })
+      return next
+    })
+    const targetIdx = Math.min(digits.length, 5)
+    const inputs = document.querySelectorAll<HTMLInputElement>('.otp-row input')
+    if (inputs[targetIdx]) {
+      inputs[targetIdx].focus()
+    }
+  }
+
   const submitCredentials = async (event: React.FormEvent) => {
     event.preventDefault()
     setError('')
@@ -399,6 +419,7 @@ export function AuthPage() {
                         className="copy-button"
                         type="button"
                         title="Copy Secret"
+                        aria-label="Copy Secret"
                         onClick={() =>
                           navigator.clipboard?.writeText(session?.secret ?? 'JBSW Y3DP EHPK 3PXP')
                         }
@@ -443,11 +464,26 @@ export function AuthPage() {
                   {otp.map((digit, index) => (
                     <input
                       key={index}
+                      id={`otp-digit-${index}`}
                       aria-label={`Authenticator digit ${index + 1}`}
                       inputMode="numeric"
                       maxLength={1}
                       value={digit}
-                      onChange={(event) => updateOtp(index, event.target.value.replace(/\D/g, ''))}
+                      onPaste={handlePaste}
+                      onChange={(event) => {
+                        const val = event.target.value.replace(/\D/g, '')
+                        updateOtp(index, val)
+                        if (val && index < 5) {
+                          const nextInput = document.getElementById(`otp-digit-${index + 1}`)
+                          if (nextInput) (nextInput as HTMLInputElement).focus()
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Backspace' && !digit && index > 0) {
+                          const prevInput = document.getElementById(`otp-digit-${index - 1}`)
+                          if (prevInput) (prevInput as HTMLInputElement).focus()
+                        }
+                      }}
                     />
                   ))}
                 </div>

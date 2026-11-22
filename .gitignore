@@ -30,3 +30,4 @@ data/
 .vscode/
 *.tsbuildinfo
 .DS_Store
+vite.config.js

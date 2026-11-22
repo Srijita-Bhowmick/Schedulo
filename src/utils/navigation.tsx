@@ -9,8 +9,26 @@ export type Path =
   | '/dashboard/admin'
   | '/dashboard/hod'
 
+function getCurrentPath(): Path {
+  // [M-26] Support hash routing fallback for GitHub Pages
+  if (typeof window !== 'undefined' && window.location.hash && window.location.hash.startsWith('#/')) {
+    return (window.location.hash.slice(1) as Path) || '/'
+  }
+  return (typeof window !== 'undefined' ? (window.location.pathname as Path) : '/') || '/'
+}
+
 export function navigate(path: Path) {
-  window.history.pushState({}, '', path)
+  if (typeof window === 'undefined') return
+  const isHashMode =
+    window.location.protocol === 'file:' ||
+    window.location.hash.startsWith('#/') ||
+    window.location.pathname.includes('/schedulo')
+
+  if (isHashMode) {
+    window.location.hash = path
+  } else {
+    window.history.pushState({}, '', path)
+  }
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
@@ -25,11 +43,15 @@ export function formatClock(d: Date): string {
 }
 
 export function usePath() {
-  const [path, setPath] = useState<Path>((window.location.pathname as Path) || '/')
+  const [path, setPath] = useState<Path>(getCurrentPath())
   useEffect(() => {
-    const listener = () => setPath((window.location.pathname as Path) || '/')
+    const listener = () => setPath(getCurrentPath())
     window.addEventListener('popstate', listener)
-    return () => window.removeEventListener('popstate', listener)
+    window.addEventListener('hashchange', listener)
+    return () => {
+      window.removeEventListener('popstate', listener)
+      window.removeEventListener('hashchange', listener)
+    }
   }, [])
   return path
 }
