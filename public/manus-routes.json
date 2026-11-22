@@ -1,0 +1,9 @@
+{
+  "routes": [
+    { "path": "/", "title": "Schedulo — Clash-Free Campus Scheduling" },
+    { "path": "/auth", "title": "Schedulo — Secure Access" },
+    { "path": "/dashboard/student", "title": "Schedulo — Student Dashboard" },
+    { "path": "/dashboard/teacher", "title": "Schedulo — Teacher Dashboard" },
+    { "path": "/dashboard/admin", "title": "Schedulo — Department Admin" }
+  ]
+}

@@ -5,3 +5,8 @@ dist-ssr
 .vscode/
 *.tsbuildinfo
 .DS_Store
+
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+server/dist
