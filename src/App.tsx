@@ -6,19 +6,22 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
+  Building,
   CalendarDays,
   Check,
   ChevronLeft,
   ClipboardCheck,
+  Clock,
   Copy,
   Download,
   ExternalLink,
   FileDown,
   Layers3,
+  Lock,
   LockKeyhole,
   LogOut,
   Menu,
-  MonitorCog,
+  Moon,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
@@ -30,27 +33,34 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Sun,
   UserRound,
   Users,
   X,
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
-  AdminDashboardData,
+  AuthPayload,
   AuthSession,
-  DashboardView,
+  BatchInfo,
+  CollegeConfig,
+  DepartmentData,
+  HodDashboardData,
   LiveAlert,
   Role,
   ROLE_META,
   ScheduleBlock,
+  SolverResult,
   StudentDashboardData,
   TeacherDashboardData,
   createAuthSession,
-  getAdminDashboard,
+  getDepartments,
+  getHodDashboard,
   getStudentDashboard,
   getTeacherDashboard,
   publishTimetable,
   runDeterministicSolver,
+  updateCollegeConfig,
   validateReschedule,
   verifyTwoFactor,
 } from './services/api'
@@ -70,7 +80,7 @@ import { SpatialTimetable } from './components/SpatialTimetable'
 import { WeeklyBoxMatrix, ClassDetailModal } from './components/WeeklyBoxMatrix'
 import './styles.css'
 
-type Path = '/' | '/auth' | '/dashboard/student' | '/dashboard/teacher' | '/dashboard/admin'
+type Path = '/' | '/auth' | '/dashboard/student' | '/dashboard/teacher' | '/dashboard/admin' | '/dashboard/hod'
 
 function navigate(path: Path) {
   window.history.pushState({}, '', path)
@@ -89,7 +99,7 @@ function usePath() {
 
 function PageTransition({ children }: { children: React.ReactNode }) {
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.34, ease: 'easeOut' }}>
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }}>
       {children}
     </motion.div>
   )
@@ -97,6 +107,19 @@ function PageTransition({ children }: { children: React.ReactNode }) {
 
 function LandingPage() {
   const [architectureOpen, setArchitectureOpen] = useState(false)
+  const [collegeName, setCollegeName] = useState('Apex Institute of Technology & Science')
+
+  useEffect(() => {
+    getDepartments().then((data) => {
+      if (data.collegeName) setCollegeName(data.collegeName)
+    })
+  }, [])
+
+  const enterRolePortal = (role: Role) => {
+    localStorage.setItem('schedulo_selected_role', role)
+    navigate('/auth')
+  }
+
   return (
     <PageTransition>
       <div className="landing-page">
@@ -111,6 +134,7 @@ function LandingPage() {
             </Button>
           </div>
         </header>
+
         <main className="landing-page__main">
           <section className="hero-copy">
             <span className="eyebrow">DETERMINISTIC ENGINE · ZERO AI · MANDATORY 2FA</span>
@@ -119,31 +143,45 @@ function LandingPage() {
               <span style={{ color: 'var(--mist)' }}>Secured by 2FA.</span>
             </h1>
             <p className="hero-copy__intro">
-              A deterministic constraint-satisfaction engine using Minimum Remaining Values (MRV) that guarantees zero room, teacher, or batch overlaps — before the timetable reaches campus.
+              A pure algorithmic constraint-satisfaction engine using Minimum Remaining Values (MRV) that guarantees zero room, teacher, or batch double-bookings — with a dedicated protected campus lunch break.
             </p>
             <div className="role-entry">
-              {(['student', 'teacher', 'admin'] as Role[]).map((role, index) => (
-                <button key={role} onClick={() => navigate('/auth')}>
-                  <span className="role-entry__num">0{index + 1} / ENTRY</span>
-                  <span className="role-entry__label">{ROLE_META[role].label}</span>
+              {[
+                { role: 'student' as Role, num: '01', title: 'STUDENT PORTAL' },
+                { role: 'teacher' as Role, num: '02', title: 'FACULTY MATRIX' },
+                { role: 'hod' as Role, num: '03', title: 'HOD / ADMIN OPERATIONS' },
+              ].map(({ role, num, title }) => (
+                <button key={role} onClick={() => enterRolePortal(role)}>
+                  <span className="role-entry__num">{num} / DIRECT ENTRY</span>
+                  <span className="role-entry__label">{title}</span>
                 </button>
               ))}
             </div>
             <div className="hero-meta">
               <span>THEORY ROOMS ONLY</span>
-              <span>RFC-6238 COMPLIANT</span>
+              <span>RFC-6238 TOTP</span>
               <span>MRV SOLVER V2.4</span>
             </div>
           </section>
+
           <section aria-label="Interactive spatial timetable">
             <SpatialTimetable />
           </section>
         </main>
-        <footer className="footer-strip">
-          <span>Algorithmic Solver (Zero AI)</span>
-          <span>Role-Based Access</span>
-          <span>Mandatory 2FA</span>
+
+        <footer className="footer-strip" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px clamp(24px, 5vw, 80px)', maxWidth: 1600, margin: '0 auto', borderTop: '1px solid rgba(144, 194, 231, 0.12)', fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: 'rgba(244, 246, 248, 0.6)' }}>
+          <div style={{ display: 'flex', gap: 20 }}>
+            <span>Algorithmic Solver (Zero AI)</span>
+            <span>Role-Based Access</span>
+            <span>Mandatory 2FA</span>
+          </div>
+          <div>
+            <span>{collegeName}</span>
+            <span style={{ margin: '0 8px', opacity: 0.4 }}>•</span>
+            <span style={{ color: 'var(--mist)' }}>Built by Srijita Bhowmick</span>
+          </div>
         </footer>
+
         <AnimatePresence>
           {architectureOpen && <ArchitectureModal onClose={() => setArchitectureOpen(false)} />}
         </AnimatePresence>
@@ -158,8 +196,8 @@ function ArchitectureModal({ onClose }: { onClose: () => void }) {
       <motion.div className="modal" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 18 }} onClick={(event) => event.stopPropagation()}>
         <div className="modal__header">
           <div>
-            <h3>Platform architecture</h3>
-            <p>Three bounded layers keep the schedule legible, verifiable, and secure.</p>
+            <h3>Platform Architecture</h3>
+            <p>Three bounded layers keep the campus schedule mathematically verified and secure.</p>
           </div>
           <button className="modal__close" onClick={onClose}>
             <X size={18} />
@@ -167,9 +205,9 @@ function ArchitectureModal({ onClose }: { onClose: () => void }) {
         </div>
         <div className="modal__body">
           {[
-            ['01', 'Constraint Domain Model', 'Theory rooms, teacher unavailable slots, student batches, and weekly hours are reduced via forward-checking before assignment.'],
-            ['02', 'Deterministic Backtracking Solver (Zero AI)', 'Minimum Remaining Values (MRV) selects the most-constrained teacher/batch first, guaranteeing 100% mathematical validity with zero hallucinations.'],
-            ['03', 'RFC-6238 TOTP 2FA & Strict RBAC', 'Two-stage authentication gates all routes. Student, Teacher, and Admin portals access only role-scoped resources with real-time operational change alerts.'],
+            ['01', 'Constraint Domain Model', 'Theory halls, teacher availability slots, student batches, and weekly hours are reduced via forward-checking with a locked 13:00–14:00 lunch recess.'],
+            ['02', 'Pure Deterministic Solver (Zero AI)', 'Minimum Remaining Values (MRV) orders most-constrained variables first, guaranteeing 100% mathematical validity with zero hallucinations and zero heuristics guessing.'],
+            ['03', 'RFC-6238 TOTP 2FA & Strict RBAC', 'Two-stage authentication gates all routes. Student, Teacher, and HOD portals access strictly scoped resources with real-time operational alerts.'],
           ].map(([number, title, body]) => (
             <div className="architecture-row" key={number}>
               <Badge tone="mist">{number}</Badge>
@@ -189,40 +227,91 @@ function AuthPage() {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [role, setRole] = useState<Role>('student')
   const [flipped, setFlipped] = useState(false)
-  const [payload, setPayload] = useState({ username: 'student@schedulo.edu', password: 'Student@1234', batch: 'CSE-5A' })
-  const [session, setSession] = useState<AuthSession | null>(null)
-  const [otp, setOtp] = useState(['', '', '', '', '', ''])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  // Clean Production Credentials (No demo defaults)
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [name, setName] = useState('')
+
+  // Smart Role Join fields
+  const [departments, setDepartments] = useState<DepartmentData[]>([])
+  const [selectedDeptId, setSelectedDeptId] = useState('')
+  const [selectedBatchId, setSelectedBatchId] = useState('')
+  const [facultyJoinCode, setFacultyJoinCode] = useState('')
+  const [hodDeptName, setHodDeptName] = useState('Computer Science & Engineering')
+  const [hodDeptCode, setHodDeptCode] = useState('CSE')
+  const [hodWorkingDays, setHodWorkingDays] = useState('Monday to Friday')
+  const [hodStartTime, setHodStartTime] = useState('09:00')
+  const [enable2fa, setEnable2fa] = useState(true)
+
+  // 2FA session state
+  const [session, setSession] = useState<AuthSession | null>(null)
+  const [otp, setOtp] = useState(['', '', '', '', '', ''])
+
+  useEffect(() => {
+    // Read pre-selected role if arrived via role entry portals
+    const savedRole = localStorage.getItem('schedulo_selected_role') as Role | null
+    if (savedRole && (savedRole === 'student' || savedRole === 'teacher' || savedRole === 'hod' || savedRole === 'admin')) {
+      setRole(savedRole)
+      localStorage.removeItem('schedulo_selected_role')
+    }
+
+    // Fetch dynamic departments and batches
+    getDepartments().then((data) => {
+      setDepartments(data.departments)
+      if (data.departments.length > 0) {
+        setSelectedDeptId(data.departments[0].id)
+        if (data.departments[0].batches.length > 0) {
+          setSelectedBatchId(data.departments[0].batches[0].id)
+        }
+      }
+    })
+  }, [])
+
+  // When selected department changes, update batch selection
+  const currentDept = useMemo(() => departments.find((d) => d.id === selectedDeptId), [departments, selectedDeptId])
+
   const updateOtp = (index: number, value: string) =>
     setOtp((items) => items.map((item, itemIndex) => (itemIndex === index ? value.slice(-1) : item)))
-
-  const quickFill = (r: Role, user: string, pass: string) => {
-    setRole(r)
-    setMode('signin')
-    setPayload({ username: user, password: pass, batch: 'CSE-5A' })
-  }
 
   const submitCredentials = async (event: React.FormEvent) => {
     event.preventDefault()
     setError('')
     setLoading(true)
+
     try {
-      const authSession = await createAuthSession({
-        username: payload.username,
-        password: payload.password,
+      const authPayload: AuthPayload = {
+        username,
+        password,
         role,
         mode,
-        batchOrDepartment: payload.batch,
-      })
+        name: name || username.split('@')[0],
+        departmentName: role === 'hod' ? hodDeptName : currentDept?.name,
+        departmentCode: role === 'hod' ? hodDeptCode : currentDept?.code,
+        facultyJoinCode: role === 'teacher' ? facultyJoinCode : undefined,
+        workingDays: role === 'hod' ? hodWorkingDays : undefined,
+        startTime: role === 'hod' ? hodStartTime : undefined,
+        batchId: role === 'student' ? selectedBatchId : undefined,
+        enable2fa,
+      }
+
+      const authSession = await createAuthSession(authPayload)
       setSession(authSession)
+
+      // If student sign-up opted out of 2FA, directly enter dashboard
+      if (role === 'student' && !authSession.twoFactorRequired) {
+        navigate('/dashboard/student')
+        return
+      }
+
       if (authSession.devTotp) {
         setOtp(authSession.devTotp.split(''))
       }
       setFlipped(true)
     } catch (err: any) {
-      setError(err.message || 'Login failed')
+      setError(err.message || 'Authentication failed. Please check your credentials.')
     } finally {
       setLoading(false)
     }
@@ -232,13 +321,18 @@ function AuthPage() {
     event.preventDefault()
     setError('')
     setLoading(true)
-    const valid = await verifyTwoFactor(otp.join(''))
+
+    const codeStr = otp.join('')
+    const valid = await verifyTwoFactor(codeStr)
     setLoading(false)
+
     if (!valid) {
       setError('Enter the valid six-digit authenticator code to continue.')
       return
     }
-    navigate(ROLE_META[session?.role ?? role].route as Path)
+
+    const targetRoute = ROLE_META[session?.role ?? role].route as Path
+    navigate(targetRoute)
   }
 
   return (
@@ -246,65 +340,18 @@ function AuthPage() {
       <div className="auth-page">
         <div className="auth-topline">
           <button className="text-link" onClick={() => navigate('/')}>
-            <ArrowLeft size={15} /> Back to landing
+            <ArrowLeft size={15} /> Back to Landing
           </button>
           <BrandMark />
         </div>
+
         <div className="auth-frame">
           <div className={cn('auth-card', flipped && 'is-flipped')}>
-            {/* Front of Card: Credentials & Role */}
+            {/* Front of Card: Clean Production Credentials & Smart Join */}
             <div className="auth-face auth-face--front">
               <span className="auth-kicker">ACCESS CONTROL / 01</span>
               <h1>Enter the campus grid.</h1>
-              <p>Choose your operational role. Every session is gated by mandatory TOTP 2FA.</p>
-
-              <div style={{ display: 'flex', gap: 6, margin: '14px 0 16px', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="text-link"
-                  style={{
-                    fontSize: 10,
-                    fontFamily: 'JetBrains Mono',
-                    background: 'rgba(144,194,231,0.1)',
-                    padding: '4px 8px',
-                    borderRadius: 4,
-                    border: '1px solid rgba(144,194,231,0.2)',
-                  }}
-                  onClick={() => quickFill('admin', 'admin@schedulo.edu', 'Admin@1234')}
-                >
-                  ⚡ Admin
-                </button>
-                <button
-                  type="button"
-                  className="text-link"
-                  style={{
-                    fontSize: 10,
-                    fontFamily: 'JetBrains Mono',
-                    background: 'rgba(144,194,231,0.1)',
-                    padding: '4px 8px',
-                    borderRadius: 4,
-                    border: '1px solid rgba(144,194,231,0.2)',
-                  }}
-                  onClick={() => quickFill('teacher', 'dr.roy@schedulo.edu', 'Teacher@1234')}
-                >
-                  ⚡ Teacher (Dr. Roy)
-                </button>
-                <button
-                  type="button"
-                  className="text-link"
-                  style={{
-                    fontSize: 10,
-                    fontFamily: 'JetBrains Mono',
-                    background: 'rgba(144,194,231,0.1)',
-                    padding: '4px 8px',
-                    borderRadius: 4,
-                    border: '1px solid rgba(144,194,231,0.2)',
-                  }}
-                  onClick={() => quickFill('student', 'student@schedulo.edu', 'Student@1234')}
-                >
-                  ⚡ Student (Rahul)
-                </button>
-              </div>
+              <p>Choose your operational role. Every session is protected by role-based access and RFC-6238 TOTP.</p>
 
               <div className="auth-toggle">
                 <button className={mode === 'signin' ? 'is-active' : ''} onClick={() => setMode('signin')}>
@@ -316,68 +363,164 @@ function AuthPage() {
               </div>
 
               <div className="role-switch">
-                {(['student', 'teacher', 'admin'] as Role[]).map((item) => (
+                {(['student', 'teacher', 'hod'] as Role[]).map((item) => (
                   <button key={item} className={role === item ? 'is-active' : ''} onClick={() => setRole(item)}>
-                    {ROLE_META[item].label.toUpperCase()}
+                    {item === 'hod' ? 'HOD / ADMIN' : ROLE_META[item].label.toUpperCase()}
                   </button>
                 ))}
               </div>
 
               <form className="auth-form" onSubmit={submitCredentials}>
+                {mode === 'signup' && (
+                  <Field
+                    label="FULL NAME"
+                    placeholder="Enter your full name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                  />
+                )}
+
                 <Field
-                  label="USERNAME / EMAIL"
-                  placeholder={role === 'student' ? 'student@schedulo.edu' : role === 'teacher' ? 'dr.roy@schedulo.edu' : 'admin@schedulo.edu'}
-                  value={payload.username}
-                  onChange={(event) => setPayload({ ...payload, username: event.target.value })}
+                  label="USERNAME / CAMPUS EMAIL"
+                  placeholder={
+                    role === 'student'
+                      ? 'student@schedulo.edu'
+                      : role === 'teacher'
+                      ? 'faculty@schedulo.edu'
+                      : 'hod@schedulo.edu'
+                  }
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
                   autoComplete="username"
                   required
                 />
+
                 <Field
                   label="PASSWORD"
                   placeholder="••••••••••••"
                   type="password"
-                  value={payload.password}
-                  onChange={(event) => setPayload({ ...payload, password: event.target.value })}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                   required
                 />
-                {mode === 'signup' && (
-                  <SelectField
-                    label={role === 'admin' ? 'DEPARTMENT' : 'BATCH'}
-                    value={payload.batch}
-                    onChange={(event) => setPayload({ ...payload, batch: event.target.value })}
-                  >
-                    <option>CSE-5A</option>
-                    <option>IT-5A</option>
-                    <option>Computer Science &amp; Engineering</option>
-                    <option>Information Technology</option>
-                  </SelectField>
+
+                {/* Smart Role Join Fields on Sign Up */}
+                {mode === 'signup' && role === 'hod' && (
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.6fr', gap: 10 }}>
+                      <Field
+                        label="DEPARTMENT NAME"
+                        placeholder="e.g. Computer Science & Engineering"
+                        value={hodDeptName}
+                        onChange={(e) => setHodDeptName(e.target.value)}
+                        required
+                      />
+                      <Field
+                        label="CODE"
+                        placeholder="CSE"
+                        value={hodDeptCode}
+                        onChange={(e) => setHodDeptCode(e.target.value.toUpperCase())}
+                        required
+                      />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      <SelectField
+                        label="WORKING DAYS"
+                        value={hodWorkingDays}
+                        onChange={(e) => setHodWorkingDays(e.target.value)}
+                      >
+                        <option value="Monday to Friday">Mon – Fri (5 Days)</option>
+                        <option value="Monday to Saturday">Mon – Sat (6 Days)</option>
+                      </SelectField>
+                      <SelectField
+                        label="START TIME"
+                        value={hodStartTime}
+                        onChange={(e) => setHodStartTime(e.target.value)}
+                      >
+                        <option value="09:00">09:00 IST</option>
+                        <option value="08:30">08:30 IST</option>
+                        <option value="08:00">08:00 IST</option>
+                      </SelectField>
+                    </div>
+                  </>
                 )}
-                {error && <p className="form-status" role="alert">{error}</p>}
+
+                {mode === 'signup' && role === 'teacher' && (
+                  <Field
+                    label="FACULTY JOIN CODE (FROM HOD)"
+                    placeholder="e.g. CSE-FAC-2026"
+                    value={facultyJoinCode}
+                    onChange={(e) => setFacultyJoinCode(e.target.value.toUpperCase())}
+                    hint="Provided by your Department Head to join teaching roster"
+                    required
+                  />
+                )}
+
+                {mode === 'signup' && role === 'student' && (
+                  <>
+                    <SelectField
+                      label="DEPARTMENT"
+                      value={selectedDeptId}
+                      onChange={(e) => setSelectedDeptId(e.target.value)}
+                    >
+                      {departments.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name} ({d.code})
+                        </option>
+                      ))}
+                    </SelectField>
+                    <SelectField
+                      label="SEMESTER & SECTION (BATCH)"
+                      value={selectedBatchId}
+                      onChange={(e) => setSelectedBatchId(e.target.value)}
+                    >
+                      {(currentDept?.batches || []).map((b) => (
+                        <option key={b.id} value={b.id}>
+                          Semester {b.semester} - Section {b.section} ({b.name})
+                        </option>
+                      ))}
+                    </SelectField>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer', marginTop: 2 }}>
+                      <input
+                        type="checkbox"
+                        checked={enable2fa}
+                        onChange={(e) => setEnable2fa(e.target.checked)}
+                        style={{ accentColor: 'var(--mist)' }}
+                      />
+                      <span>Enable Mandatory TOTP 2FA Security Gate</span>
+                    </label>
+                  </>
+                )}
+
+                {error && <p className="form-status" role="alert" style={{ borderColor: 'var(--ember)', color: '#ff9e87' }}>{error}</p>}
+
                 <Button className="auth-submit" size="lg" tone="mist" loading={loading} icon={ArrowRight} type="submit">
-                  Continue to 2FA
+                  {mode === 'signup' && role === 'student' && !enable2fa ? 'Complete Registration' : 'Continue to 2FA Gate'}
                 </Button>
               </form>
+
               <div className="auth-footnote">
-                <LockKeyhole size={13} /> BCrypt hashing · Role-scoped JWT issued only upon valid 6-digit TOTP verification.
+                <LockKeyhole size={13} /> BCrypt hashing · Role-scoped JWT issued upon verified credentials.
               </div>
             </div>
 
-            {/* Back of Card: 3D Flip Security Gate & TOTP */}
+            {/* Back of Card: 3D Flip Security Gate & 6-Digit TOTP */}
             <div className="auth-face auth-face--back security-gate">
               <span className="auth-kicker">MANDATORY SECURITY GATE / 02</span>
-              <h1>{mode === 'signup' ? 'Bind your authenticator.' : 'Verify and unlock.'}</h1>
+              <h1>{mode === 'signup' ? 'Bind your Authenticator.' : 'Verify and unlock.'}</h1>
               <p>
                 {mode === 'signup'
-                  ? 'Scan the setup QR code with Google Authenticator or any TOTP app, then enter the 6-digit code.'
-                  : 'Enter the 6-digit code generated by your registered RFC-6238 authenticator.'}
+                  ? 'Scan the setup QR code with Google Authenticator or Microsoft Authenticator, then enter your 6-digit code.'
+                  : 'Enter the 6-digit verification code generated by your registered authenticator application.'}
               </p>
 
               {mode === 'signup' && (
                 <>
                   <div className="qr-box" aria-label="Authenticator setup QR code">
                     <QRCodeSVG
-                      value={`otpauth://totp/Schedulo:${payload.username || 'campus.user'}?secret=${(
+                      value={`otpauth://totp/Schedulo:${username || 'campus.user'}?secret=${(
                         session?.secret ?? 'JBSWY3DPEHPK3PXP'
                       ).replace(/\s/g, '')}&issuer=Schedulo`}
                       size={110}
@@ -403,10 +546,21 @@ function AuthPage() {
                 </>
               )}
 
+              {session?.facultyJoinCode && (
+                <div style={{ margin: '8px 0 12px', padding: '8px 12px', background: 'rgba(144, 194, 231, 0.12)', borderRadius: 6, border: '1px solid rgba(144, 194, 231, 0.3)' }}>
+                  <span style={{ fontSize: 10, color: 'rgba(244, 246, 248, 0.6)', display: 'block', fontFamily: 'JetBrains Mono, monospace' }}>
+                    YOUR FACULTY JOIN CODE (SHARE WITH TEACHERS):
+                  </span>
+                  <strong style={{ fontSize: 13, color: 'var(--mist)', fontFamily: 'JetBrains Mono, monospace' }}>
+                    {session.facultyJoinCode}
+                  </strong>
+                </div>
+              )}
+
               {session?.devTotp && (
                 <div
                   style={{
-                    margin: '12px 0 10px',
+                    margin: '10px 0',
                     padding: '8px 12px',
                     background: 'rgba(144, 194, 231, 0.12)',
                     borderRadius: 6,
@@ -443,7 +597,7 @@ function AuthPage() {
                     />
                   ))}
                 </div>
-                {error && <p className="form-status" role="alert">{error}</p>}
+                {error && <p className="form-status" role="alert" style={{ borderColor: 'var(--ember)', color: '#ff9e87' }}>{error}</p>}
                 <div className="auth-back-actions">
                   <Button size="lg" tone="mist" loading={loading} icon={ShieldCheck} type="submit">
                     Verify &amp; Unlock Dashboard
@@ -454,7 +608,7 @@ function AuthPage() {
                 </div>
               </form>
               <div className="auth-footnote">
-                <ShieldCheck size={13} /> RFC-6238 TOTP window · 30 sec rotation · Dev code logged in terminal.
+                <ShieldCheck size={13} /> RFC-6238 TOTP · 30-sec rotating cryptographic window.
               </div>
             </div>
           </div>
@@ -464,19 +618,39 @@ function AuthPage() {
   )
 }
 
-function DashboardShell({ role, children }: { role: Role; children: React.ReactNode }) {
+function DashboardShell({
+  role,
+  collegeName,
+  children,
+}: {
+  role: Role
+  collegeName?: string
+  children: React.ReactNode
+}) {
   const [collapsed, setCollapsed] = useState(false)
+  // Default to light theme workspace, allow user to toggle dark mode
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    return (localStorage.getItem('schedulo_theme') as 'light' | 'dark') || 'light'
+  })
+
+  const toggleTheme = () => {
+    const nextTheme = theme === 'light' ? 'dark' : 'light'
+    setTheme(nextTheme)
+    localStorage.setItem('schedulo_theme', nextTheme)
+  }
+
   const navItems: Array<{ label: string; icon: typeof CalendarDays; path: Path }> = [
-    { label: 'Schedule', icon: CalendarDays, path: ROLE_META[role].route as Path },
-    { label: 'Alerts', icon: Radio, path: ROLE_META[role].route as Path },
-    { label: 'Access log', icon: ClipboardCheck, path: ROLE_META[role].route as Path },
+    { label: 'Weekly Matrix', icon: CalendarDays, path: ROLE_META[role].route as Path },
+    { label: 'Live Alerts', icon: Radio, path: ROLE_META[role].route as Path },
+    { label: 'Access Audit', icon: ClipboardCheck, path: ROLE_META[role].route as Path },
   ]
-  const initials = role === 'teacher' ? 'DR' : role === 'admin' ? 'DA' : 'RS'
-  const userName = role === 'student' ? 'Rahul Sharma' : role === 'teacher' ? 'Dr. Debabrata Roy' : 'Dept. Admin'
+
+  const initials = role === 'teacher' ? 'DR' : role === 'student' ? 'RS' : 'HD'
+  const userName = role === 'student' ? 'Rahul Sharma' : role === 'teacher' ? 'Dr. Debabrata Roy' : 'Head of Department'
 
   return (
     <PageTransition>
-      <div className="dashboard-app">
+      <div className={cn('dashboard-app', theme === 'light' ? 'theme-light' : 'theme-dark')}>
         <aside className={cn('sidebar', collapsed && 'is-collapsed')}>
           <div className="sidebar-top">
             <BrandMark />
@@ -486,8 +660,8 @@ function DashboardShell({ role, children }: { role: Role; children: React.ReactN
           </div>
           {!collapsed && (
             <div className="sidebar-copy">
-              <span className="sidebar-overline">OPERATING INSTANCE / 05</span>
-              <p>One verified schedule surface for every campus role.</p>
+              <span className="sidebar-overline">CAMPUS GRID / VERIFIED</span>
+              <p>{collegeName || 'Apex Institute of Technology & Science'}</p>
             </div>
           )}
           <nav className="sidebar-nav">
@@ -498,19 +672,38 @@ function DashboardShell({ role, children }: { role: Role; children: React.ReactN
               </button>
             ))}
           </nav>
-          {!collapsed && <div className="sidebar-footer">DATA REGION / IN-CAMPUS<br />LAST SYNC / 09:30:00 IST</div>}
+          {!collapsed && (
+            <div className="sidebar-footer">
+              PROTECTED REGION · IN-CAMPUS
+              <br />
+              LUNCH RECESS · 13:00–14:00 LOCKED
+            </div>
+          )}
         </aside>
+
         <div className="workspace">
           <header className="topbar">
             <div className="topbar__left">
               <div>
                 <span className="dashboard-kicker">SCHEDULO / {ROLE_META[role].shortLabel.toUpperCase()} CONSOLE</span>
-                <h1>{role === 'student' ? 'My schedule' : role === 'teacher' ? 'Teaching matrix' : 'Scheduling operations'}</h1>
+                <h1>{role === 'student' ? 'Student Timetable' : role === 'teacher' ? 'Teaching Availability Matrix' : 'HOD Scheduling Operations'}</h1>
               </div>
             </div>
             <div className="topbar__right">
-              <StatusPill>2FA VERIFIED</StatusPill>
+              {/* Dark / Light Mode Toggle Button */}
+              <button
+                type="button"
+                className="theme-toggle-btn"
+                onClick={toggleTheme}
+                title={`Switch to ${theme === 'light' ? 'Deep Midnight Teal Dark' : 'Soft Pearl Light'} Mode`}
+              >
+                {theme === 'light' ? <Moon size={14} /> : <Sun size={14} />}
+                <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
+              </button>
+
+              <StatusPill tone="mist">2FA VERIFIED</StatusPill>
               <span className="topbar-clock">22 NOV 2026 · 09:30 IST</span>
+
               <div className="user-block">
                 <div className="user-avatar">{initials}</div>
                 <div>
@@ -518,6 +711,7 @@ function DashboardShell({ role, children }: { role: Role; children: React.ReactN
                   <span>{ROLE_META[role].label}</span>
                 </div>
               </div>
+
               <button className="text-link" title="Sign out" onClick={() => navigate('/')}>
                 <LogOut size={15} />
               </button>
@@ -530,7 +724,17 @@ function DashboardShell({ role, children }: { role: Role; children: React.ReactN
   )
 }
 
-function DashboardHeader({ eyebrow, title, body, actions }: { eyebrow: string; title: string; body: string; actions?: React.ReactNode }) {
+function DashboardHeader({
+  eyebrow,
+  title,
+  body,
+  actions,
+}: {
+  eyebrow: string
+  title: string
+  body: string
+  actions?: React.ReactNode
+}) {
   return (
     <div className="dashboard-header">
       <div>
@@ -550,7 +754,7 @@ function LiveCard({ current, next }: { current: ScheduleBlock; next: ScheduleBlo
         <div className="card-heading">
           <div>
             <h3>Happening now</h3>
-            <p>Live class state from the published timetable.</p>
+            <p>Live lecture state from the published timetable.</p>
           </div>
           <Badge tone="mist" dot>LIVE</Badge>
         </div>
@@ -574,6 +778,7 @@ function LiveCard({ current, next }: { current: ScheduleBlock; next: ScheduleBlo
           </div>
         </div>
       </Surface>
+
       <Surface className="next-card">
         <div className="card-heading">
           <div>
@@ -598,11 +803,12 @@ function LiveCard({ current, next }: { current: ScheduleBlock; next: ScheduleBlo
 function AlertBanner({ alerts, className }: { alerts: LiveAlert[]; className?: string }) {
   const alert = alerts[0]
   if (!alert) return null
+
   return (
     <div className={cn('schedule-alert', className)}>
       <AlertTriangle size={17} />
       <div>
-        <strong>Live schedule alert · {alert.title}</strong>
+        <strong>Live Schedule Alert · {alert.title}</strong>
         <p>
           {alert.detail} <span className="mono">{alert.time}</span>
         </p>
@@ -611,6 +817,9 @@ function AlertBanner({ alerts, className }: { alerts: LiveAlert[]; className?: s
   )
 }
 
+/* ========================================================= */
+/* STUDENT DASHBOARD                                         */
+/* ========================================================= */
 function StudentDashboard() {
   const [data, setData] = useState<StudentDashboardData | null>(null)
   const [selectedBlock, setSelectedBlock] = useState<ScheduleBlock | null>(null)
@@ -621,43 +830,63 @@ function StudentDashboard() {
   }, [])
 
   if (!data) return <LoadingDashboard />
-  const exportSchedule = (format: string) => {
-    setToast(`${format} export staged locally.`)
-    window.setTimeout(() => setToast(''), 2200)
+
+  const exportPDF = () => {
+    window.print()
+    setToast('PDF Print dialog opened for your timetable.')
+    setTimeout(() => setToast(''), 3000)
+  }
+
+  const exportCSV = () => {
+    const headers = ['Subject Code', 'Subject Title', 'Faculty', 'Room', 'Batch', 'Day', 'Start Time', 'End Time']
+    const rows = data.blocks.map((b) => [b.code, b.subject, b.faculty, b.room, b.batch, b.day, b.start, b.end])
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n')
+    const encodedUri = encodeURI(csvContent)
+    const link = document.createElement('a')
+    link.setAttribute('href', encodedUri)
+    link.setAttribute('download', `Schedulo_Timetable_${data.activeBatch}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    setToast(`Timetable for ${data.activeBatch} downloaded as CSV.`)
+    setTimeout(() => setToast(''), 3000)
   }
 
   return (
-    <DashboardShell role="student">
+    <DashboardShell role="student" collegeName={data.collegeName}>
       <main className="dashboard-main">
         <DashboardHeader
-          eyebrow={`STUDENT / ${data.activeBatch}`}
-          title="Your week, without the collision."
-          body={`Published schedule · Last sync ${data.updatedAt}`}
+          eyebrow={`STUDENT · ${data.activeBatch} · ${data.department}`}
+          title="Your Week, Without the Collision."
+          body={`Published Schedule · ${data.collegeName} · Last Sync ${data.updatedAt}`}
           actions={
             <>
-              <Button tone="light" size="sm" icon={FileDown} onClick={() => exportSchedule('PDF')}>
+              <Button tone="light" size="sm" icon={FileDown} onClick={exportPDF}>
                 Export PDF
               </Button>
-              <Button tone="dark" size="sm" icon={Download} onClick={() => exportSchedule('CSV')}>
+              <Button tone="dark" size="sm" icon={Download} onClick={exportCSV}>
                 Export CSV
               </Button>
             </>
           }
         />
+
         <div className="dashboard-grid">
           <LiveCard current={data.current} next={data.next} />
+
           <Surface className="surface--dark">
             <div className="card-heading">
               <div>
-                <h3>Security state</h3>
-                <p>Session and publication health.</p>
+                <h3>Security &amp; Policy State</h3>
+                <p>2FA verified session health.</p>
               </div>
               <ShieldCheck size={17} color="#90C2E7" />
             </div>
             <div style={{ padding: '20px 21px' }}>
               <StatusPill tone="mist">2FA VERIFIED</StatusPill>
               <p style={{ color: 'rgba(244,246,248,.62)', fontSize: 12, lineHeight: 1.6, margin: '17px 0 21px' }}>
-                Your role-based session is active. All schedule changes are published by Department Admin.
+                Your role-based session is verified. 13:00–14:00 lunch recess is locked campus-wide.
               </p>
               <div className="mono" style={{ color: 'rgba(244,246,248,.42)', fontSize: 9, lineHeight: 1.7 }}>
                 SESSION / CAMPUS-EDGE-17<br />
@@ -665,12 +894,15 @@ function StudentDashboard() {
               </div>
             </div>
           </Surface>
+
           <AlertBanner alerts={data.alerts} className="schedule-alert--wide" />
-          <Surface className="timeline-card">
+
+          {/* Modular Weekly Box Matrix as the primary centerpiece */}
+          <Surface className="timeline-card" style={{ gridColumn: '1 / -1' }}>
             <div className="card-heading">
               <div>
-                <h3>Weekly Schedule Matrix · {data.activeBatch}</h3>
-                <p>Modular discrete tiles · 6 time periods across Monday to Friday · Click any tile for full details.</p>
+                <h3>Weekly Box Matrix · {data.activeBatch}</h3>
+                <p>Tactile modular tiles · 6 lecture periods + locked lunch recess (13:00–14:00) · Click any box to inspect full room &amp; faculty metadata.</p>
               </div>
               <Badge tone="mist" dot>PUBLISHED</Badge>
             </div>
@@ -684,6 +916,7 @@ function StudentDashboard() {
             </div>
           </Surface>
         </div>
+
         {selectedBlock && (
           <ClassDetailModal
             block={selectedBlock}
@@ -691,12 +924,16 @@ function StudentDashboard() {
             onClose={() => setSelectedBlock(null)}
           />
         )}
+
         {toast && <div className="toast">{toast}</div>}
       </main>
     </DashboardShell>
   )
 }
 
+/* ========================================================= */
+/* TEACHER DASHBOARD                                         */
+/* ========================================================= */
 function TeacherDashboard() {
   const [data, setData] = useState<TeacherDashboardData | null>(null)
   const [unavailable, setUnavailable] = useState<string[]>([])
@@ -704,8 +941,10 @@ function TeacherDashboard() {
   const [selectedBlock, setSelectedBlock] = useState<ScheduleBlock | null>(null)
   const [targetRoom, setTargetRoom] = useState('Room 201')
   const [targetBatch, setTargetBatch] = useState('CSE-5A')
+  const [isThisWeekOnly, setIsThisWeekOnly] = useState(true)
   const [validation, setValidation] = useState('')
   const [loading, setLoading] = useState(false)
+  const [toast, setToast] = useState('')
 
   useEffect(() => {
     getTeacherDashboard().then((result) => {
@@ -718,10 +957,14 @@ function TeacherDashboard() {
 
   const toggleSlot = (day: string, time: string) => {
     const key = `${day}-${time}`
-    setUnavailable((items) => (items.includes(key) ? items.filter((item) => item !== key) : [...items, key]))
+    setUnavailable((items) => {
+      const next = items.includes(key) ? items.filter((item) => item !== key) : [...items, key]
+      return next
+    })
   }
 
   const handleRescheduleBlock = (block: ScheduleBlock) => {
+    setSelectedBlock(block)
     setTargetRoom(block.room)
     setTargetBatch(block.batch)
     setValidation('')
@@ -730,34 +973,42 @@ function TeacherDashboard() {
 
   const validate = async () => {
     setLoading(true)
-    const result = await validateReschedule(targetRoom, targetBatch)
+    const result = await validateReschedule(targetRoom, targetBatch, isThisWeekOnly)
     setValidation(result.message)
     setLoading(false)
   }
 
+  const confirmReschedule = () => {
+    setModalOpen(false)
+    setToast(`Class reschedule request recorded (${isThisWeekOnly ? 'This Week Only' : 'Permanent'}). Alert dispatched.`)
+    setTimeout(() => setToast(''), 3000)
+  }
+
   return (
-    <DashboardShell role="teacher">
+    <DashboardShell role="teacher" collegeName={data.collegeName}>
       <main className="dashboard-main">
         <DashboardHeader
-          eyebrow={`TEACHER / ${data.faculty.toUpperCase()}`}
-          title="Teaching matrix"
-          body="Assigned theory classes across batches · Click open cells to block, or click classes to reschedule"
+          eyebrow={`FACULTY / ${data.faculty.toUpperCase()} · ${data.departments.join(' & ')}`}
+          title="Teaching Availability Matrix"
+          body="Cross-department teaching schedule · Click empty boxes to toggle Blocked/Unavailable, or click assigned classes to reschedule"
           actions={
             <Button tone="ember" size="sm" icon={RefreshCw} onClick={() => setModalOpen(true)}>
-              Reschedule / Cancel
+              Reschedule Class
             </Button>
           }
         />
+
         <div className="teacher-grid">
           <div className="dashboard-stack">
             <div className="instruction-strip">
-              <strong>Interactive Availability Matrix</strong> · Click any open free box to toggle <strong>Blocked / Unavailable</strong> for future solver runs. Click any assigned class box to inspect or reschedule.
+              <strong>Interactive Availability Matrix</strong> · Click any open free box to toggle <strong>Blocked / Unavailable</strong> for future solver runs. Click any assigned class box to inspect details or trigger a temporary <strong>This Week Only</strong> reschedule.
             </div>
+
             <Surface>
               <div className="card-heading">
                 <div>
-                  <h3>My Teaching Matrix · {data.faculty}</h3>
-                  <p>Discrete weekly tiles · Live availability sync · Assigned classes remain locked</p>
+                  <h3>Unified Teaching Matrix · {data.faculty}</h3>
+                  <p>Classes across departments ({data.departments.join(', ')}) · 13:00–14:00 Lunch Recess locked</p>
                 </div>
                 <Badge tone="mist">INTERACTIVE</Badge>
               </div>
@@ -773,10 +1024,11 @@ function TeacherDashboard() {
               </div>
             </Surface>
           </div>
+
           <div className="dashboard-stack">
             <Surface className="surface--dark solver-card">
-              <h3>Availability register</h3>
-              <p>These exclusions are local to your faculty profile and applied before the next deterministic run.</p>
+              <h3>Availability Register</h3>
+              <p>These blocked exclusions are applied deterministically before the next solver run.</p>
               <div className="solver-stats">
                 <div className="solver-stat">
                   <strong>{unavailable.length.toString().padStart(2, '0')}</strong>
@@ -784,7 +1036,7 @@ function TeacherDashboard() {
                 </div>
                 <div className="solver-stat">
                   <strong>{data.blocks.length.toString().padStart(2, '0')}</strong>
-                  <span>ASSIGNED CLASS</span>
+                  <span>ASSIGNED CLASSES</span>
                 </div>
                 <div className="solver-stat">
                   <strong>{data.batches.length.toString().padStart(2, '0')}</strong>
@@ -792,20 +1044,22 @@ function TeacherDashboard() {
                 </div>
               </div>
               <div className="mono" style={{ color: 'rgba(244,246,248,.48)', fontSize: 9, lineHeight: 1.8 }}>
-                SYNC / FUTURE SOLVER INPUT<br />
-                SCOPE / FACULTY: {data.faculty.toUpperCase()}
+                SYNC / LIVE REST API<br />
+                FACULTY / {data.faculty.toUpperCase()}
               </div>
             </Surface>
+
             <Surface className="publish-card">
-              <h3>Operational note</h3>
-              <p>Room and batch checks run before a change becomes a live alert. No change is published from this panel without validation.</p>
+              <h3>Operational Note</h3>
+              <p>Room and batch conflicts are checked in real-time. No change is published without pure constraint validation.</p>
               <Button tone="light" icon={Settings2} onClick={() => setModalOpen(true)}>
-                Open change request
+                Open Change Request
               </Button>
             </Surface>
           </div>
         </div>
-        {selectedBlock && (
+
+        {selectedBlock && !modalOpen && (
           <ClassDetailModal
             block={selectedBlock}
             mode="teacher"
@@ -813,40 +1067,55 @@ function TeacherDashboard() {
             onReschedule={handleRescheduleBlock}
           />
         )}
+
         {modalOpen && (
           <RescheduleModal
+            selectedBlock={selectedBlock}
             room={targetRoom}
             batch={targetBatch}
+            isThisWeekOnly={isThisWeekOnly}
+            setIsThisWeekOnly={setIsThisWeekOnly}
             setRoom={setTargetRoom}
             setBatch={setTargetBatch}
             validation={validation}
             loading={loading}
             onValidate={validate}
+            onConfirm={confirmReschedule}
             onClose={() => setModalOpen(false)}
           />
         )}
+
+        {toast && <div className="toast">{toast}</div>}
       </main>
     </DashboardShell>
   )
 }
 
 function RescheduleModal({
+  selectedBlock,
   room,
   batch,
+  isThisWeekOnly,
+  setIsThisWeekOnly,
   setRoom,
   setBatch,
   validation,
   loading,
   onValidate,
+  onConfirm,
   onClose,
 }: {
+  selectedBlock: ScheduleBlock | null
   room: string
   batch: string
+  isThisWeekOnly: boolean
+  setIsThisWeekOnly: (val: boolean) => void
   setRoom: (value: string) => void
   setBatch: (value: string) => void
   validation: string
   loading: boolean
   onValidate: () => void
+  onConfirm: () => void
   onClose: () => void
 }) {
   return (
@@ -854,30 +1123,63 @@ function RescheduleModal({
       <motion.div className="modal" initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} onClick={(event) => event.stopPropagation()}>
         <div className="modal__header">
           <div>
-            <h3>Reschedule / cancel class</h3>
-            <p>Validate the target domain before an alert is dispatched.</p>
+            <h3>Reschedule / Move Class</h3>
+            <p>
+              {selectedBlock
+                ? `Moving ${selectedBlock.code} (${selectedBlock.subject}) from ${selectedBlock.day} ${selectedBlock.start}`
+                : 'Validate target theory hall and batch availability before dispatching live alert.'}
+            </p>
           </div>
           <button className="modal__close" onClick={onClose}>
             <X size={18} />
           </button>
         </div>
+
         <div className="modal__body">
-          <SelectField label="TARGET ROOM" value={room} onChange={(event) => setRoom(event.target.value)}>
-            <option>Room 201</option>
-            <option>Room 202</option>
+          {/* "This Week Only" Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'rgba(5, 21, 24, 0.6)', borderRadius: 6, border: '1px solid rgba(144, 194, 231, 0.2)' }}>
+            <div>
+              <strong style={{ display: 'block', fontSize: 13, color: 'var(--pearl)' }}>This Week Only</strong>
+              <span style={{ fontSize: 11, color: 'rgba(244, 246, 248, 0.6)' }}>Temporary substitution without altering base timetable</span>
+            </div>
+            <input
+              type="checkbox"
+              checked={isThisWeekOnly}
+              onChange={(e) => setIsThisWeekOnly(e.target.checked)}
+              style={{ width: 18, height: 18, accentColor: 'var(--mist)', cursor: 'pointer' }}
+            />
+          </div>
+
+          <SelectField label="TARGET THEORY ROOM" value={room} onChange={(event) => setRoom(event.target.value)}>
             <option>Room 101</option>
             <option>Room 102</option>
+            <option>Room 201</option>
+            <option>Room 202</option>
           </SelectField>
-          <SelectField label="TARGET BATCH" value={batch} onChange={(event) => setBatch(event.target.value)}>
+
+          <SelectField label="TARGET STUDENT BATCH" value={batch} onChange={(event) => setBatch(event.target.value)}>
             <option>CSE-5A</option>
+            <option>CSE-5B</option>
             <option>IT-5A</option>
           </SelectField>
+
           <Button tone="dark" loading={loading} icon={ClipboardCheck} onClick={onValidate}>
-            Validate availability
+            Validate Constraint Availability
           </Button>
-          {validation && <div className="form-status">{validation}</div>}
-          <Button tone="ember" icon={Send} disabled={!validation || validation.includes('occupied')} onClick={onClose}>
-            Prepare live alert
+
+          {validation && (
+            <div className={cn('form-status', validation.includes('occupied') && 'form-status--clash')} style={validation.includes('occupied') ? { borderColor: 'var(--ember)', color: '#ff9e87', background: 'rgba(224, 109, 83, 0.15)' } : undefined}>
+              {validation}
+            </div>
+          )}
+
+          <Button
+            tone="ember"
+            icon={Send}
+            disabled={!validation || validation.includes('occupied')}
+            onClick={onConfirm}
+          >
+            Confirm &amp; Dispatch Live Alert
           </Button>
         </div>
       </motion.div>
@@ -885,18 +1187,28 @@ function RescheduleModal({
   )
 }
 
-function AdminDashboard() {
-  const [data, setData] = useState<AdminDashboardData | null>(null)
-  const [tab, setTab] = useState('Theory Rooms')
+/* ========================================================= */
+/* HOD / DEPARTMENT ADMIN DASHBOARD                          */
+/* ========================================================= */
+function HodDashboard() {
+  const [data, setData] = useState<HodDashboardData | null>(null)
+  const [tab, setTab] = useState<'Settings' | 'Rooms' | 'Faculty' | 'Batches' | 'Subjects'>('Settings')
   const [solving, setSolving] = useState(false)
-  const [solver, setSolver] = useState<Awaited<ReturnType<typeof runDeterministicSolver>> | null>(null)
+  const [solver, setSolver] = useState<SolverResult | null>(null)
   const [published, setPublished] = useState('')
   const [selectedBlock, setSelectedBlock] = useState<ScheduleBlock | null>(null)
   const [filterBatch, setFilterBatch] = useState<string>('ALL')
   const [filterFaculty, setFilterFaculty] = useState<string>('ALL')
 
+  // Editable College & Dept Settings
+  const [collegeNameInput, setCollegeNameInput] = useState('')
+  const [copiedCode, setCopiedCode] = useState(false)
+
   const fetchDashboardData = () => {
-    getAdminDashboard().then(setData)
+    getHodDashboard().then((res) => {
+      setData(res)
+      setCollegeNameInput(res.collegeName)
+    })
   }
 
   useEffect(() => {
@@ -916,14 +1228,18 @@ function AdminDashboard() {
 
   const publish = async () => {
     const result = await publishTimetable()
-    setPublished(`${result.publishedAt} · ${result.recipients} recipients`)
+    setPublished(`${result.publishedAt} · ${result.recipients} recipients notified`)
   }
 
-  const tabData: Record<string, string[]> = {
-    'Theory Rooms': data.rooms,
-    Faculty: data.faculty,
-    'Student Batches': data.batches,
-    Subjects: data.subjects.map((subject) => `${subject.code} · ${subject.name} (${subject.hours}h/wk)`),
+  const copyJoinCode = () => {
+    navigator.clipboard?.writeText(data.facultyJoinCode)
+    setCopiedCode(true)
+    setTimeout(() => setCopiedCode(false), 2000)
+  }
+
+  const saveCollegeName = async () => {
+    await updateCollegeConfig({ collegeName: collegeNameInput })
+    fetchDashboardData()
   }
 
   // Filter blocks based on dropdown selection
@@ -935,12 +1251,12 @@ function AdminDashboard() {
   })
 
   return (
-    <DashboardShell role="admin">
+    <DashboardShell role="hod" collegeName={data.collegeName}>
       <main className="dashboard-main">
         <DashboardHeader
-          eyebrow="DEPARTMENT ADMIN / SCHEDULING OPERATIONS"
-          title="A valid week, assembled."
-          body="Configure theory resources, run the deterministic solver, inspect the weekly boxes, then publish."
+          eyebrow={`HEAD OF DEPARTMENT · ${data.departmentCode} · ${data.department.toUpperCase()}`}
+          title="A Valid Week, Assembled."
+          body="Configure theory halls, faculty rosters, run the deterministic solver, inspect the weekly matrix, then publish campus-wide."
           actions={
             <Button tone="dark" size="sm" icon={Play} loading={solving} onClick={runSolver}>
               Run Algorithmic Solver
@@ -953,7 +1269,7 @@ function AdminDashboard() {
           <div className="card-heading">
             <div>
               <h3>Generated Weekly Timetable Matrix</h3>
-              <p>Modular discrete tiles · Inspect solver-assigned lecture domains across batches and faculty before publishing campus-wide.</p>
+              <p>Modular discrete tiles · 6 lecture periods + locked lunch recess (13:00–14:00) · Inspect solver-assigned domains across batches and faculty before publishing.</p>
             </div>
             <Badge tone="mist" dot>MRV VERIFIED</Badge>
           </div>
@@ -970,8 +1286,8 @@ function AdminDashboard() {
                   >
                     <option value="ALL">All Batches (Combined)</option>
                     {data.batches.map((b) => (
-                      <option key={b} value={b}>
-                        {b}
+                      <option key={b.id} value={b.name}>
+                        {b.name} (Sem {b.semester})
                       </option>
                     ))}
                   </select>
@@ -985,8 +1301,8 @@ function AdminDashboard() {
                   >
                     <option value="ALL">All Faculty</option>
                     {data.faculty.map((f) => (
-                      <option key={f} value={f}>
-                        {f}
+                      <option key={f.id} value={f.name}>
+                        {f.name} {f.isShared ? '(Shared)' : ''}
                       </option>
                     ))}
                   </select>
@@ -1014,67 +1330,219 @@ function AdminDashboard() {
             <Surface>
               <div className="card-heading">
                 <div>
-                  <h3>Setup workspace</h3>
-                  <p>Every resource is explicit before the solver receives a domain.</p>
+                  <h3>Setup Workspace</h3>
+                  <p>Explicit theory rooms, faculty codes, batches, and subjects with 2-hour blocks.</p>
                 </div>
                 <Badge tone="mist">THEORY ONLY</Badge>
               </div>
+
               <div className="admin-tabs">
-                {Object.keys(tabData).map((item) => (
+                {(['Settings', 'Rooms', 'Faculty', 'Batches', 'Subjects'] as const).map((item) => (
                   <button key={item} className={tab === item ? 'is-active' : ''} onClick={() => setTab(item)}>
                     {item.toUpperCase()}
                   </button>
                 ))}
               </div>
-              <table className="setup-table">
-                <thead>
-                  <tr>
-                    <th>RESOURCE</th>
-                    <th>STATUS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tabData[tab].map((item) => (
-                    <tr key={item}>
-                      <td>{item}</td>
-                      <td>
-                        <Badge tone="mist" dot>READY</Badge>
-                      </td>
+
+              {/* Tab 1: Department Settings */}
+              {tab === 'Settings' && (
+                <div style={{ padding: '16px 20px' }}>
+                  <div style={{ marginBottom: 16 }}>
+                    <span className="detail-label">FACULTY JOIN CODE</span>
+                    <div className="join-code-badge">
+                      <span>{data.facultyJoinCode}</span>
+                      <button className="join-code-copy" onClick={copyJoinCode} title="Copy Faculty Join Code">
+                        {copiedCode ? <Check size={14} color="#90C2E7" /> : <Copy size={14} />}
+                      </button>
+                    </div>
+                    <span style={{ display: 'block', fontSize: 11, color: 'rgba(244, 246, 248, 0.5)', marginTop: 4 }}>
+                      Share this code with professors so they join your department roster automatically.
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+                    <div>
+                      <span className="detail-label">DEPARTMENT NAME</span>
+                      <strong style={{ fontSize: 13, display: 'block', marginTop: 2 }}>{data.department}</strong>
+                    </div>
+                    <div>
+                      <span className="detail-label">DEPARTMENT CODE</span>
+                      <strong style={{ fontSize: 13, display: 'block', marginTop: 2 }}>{data.departmentCode}</strong>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                    <div>
+                      <span className="detail-label">WORKING DAYS</span>
+                      <strong style={{ fontSize: 12, display: 'block', marginTop: 2 }}>{data.workingDays.join(', ')}</strong>
+                    </div>
+                    <div>
+                      <span className="detail-label">START TIME &amp; PERIOD</span>
+                      <strong style={{ fontSize: 12, display: 'block', marginTop: 2 }}>{data.startTime} IST · {data.periodDurationMinutes} mins</strong>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="detail-label">COLLEGE NAME</span>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                      <input
+                        className="matrix-select"
+                        style={{ flex: 1, padding: '7px 12px' }}
+                        value={collegeNameInput}
+                        onChange={(e) => setCollegeNameInput(e.target.value)}
+                      />
+                      <Button tone="light" size="sm" onClick={saveCollegeName}>
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 2: Rooms */}
+              {tab === 'Rooms' && (
+                <table className="setup-table">
+                  <thead>
+                    <tr>
+                      <th>THEORY ROOM</th>
+                      <th>BUILDING</th>
+                      <th>CAPACITY</th>
+                      <th>TYPE</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {data.rooms.map((r) => (
+                      <tr key={r.id}>
+                        <td style={{ fontWeight: 600 }}>{r.roomNumber}</td>
+                        <td>{r.building}</td>
+                        <td>{r.capacity} seats</td>
+                        <td>
+                          <Badge tone={r.isShared ? 'ember' : 'mist'}>
+                            {r.isShared ? 'SHARED' : 'DEPT'}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              {/* Tab 3: Faculty */}
+              {tab === 'Faculty' && (
+                <table className="setup-table">
+                  <thead>
+                    <tr>
+                      <th>FACULTY MEMBER</th>
+                      <th>SHORT CODE</th>
+                      <th>DEPARTMENT</th>
+                      <th>STATUS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.faculty.map((f) => (
+                      <tr key={f.id}>
+                        <td style={{ fontWeight: 600 }}>{f.name}</td>
+                        <td><span className="mono">{f.shortCode}</span></td>
+                        <td>{f.department}</td>
+                        <td>
+                          <Badge tone={f.isShared ? 'ember' : 'mist'} dot>
+                            {f.isShared ? 'SHARED' : 'ACTIVE'}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              {/* Tab 4: Batches */}
+              {tab === 'Batches' && (
+                <table className="setup-table">
+                  <thead>
+                    <tr>
+                      <th>BATCH</th>
+                      <th>SEMESTER</th>
+                      <th>SECTION</th>
+                      <th>STUDENTS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.batches.map((b) => (
+                      <tr key={b.id}>
+                        <td style={{ fontWeight: 600 }}>{b.name}</td>
+                        <td>Semester {b.semester}</td>
+                        <td>Section {b.section}</td>
+                        <td>{b.studentCount} enrolled</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              {/* Tab 5: Subjects */}
+              {tab === 'Subjects' && (
+                <table className="setup-table">
+                  <thead>
+                    <tr>
+                      <th>SUBJECT</th>
+                      <th>HOURS/WK</th>
+                      <th>ASSIGNED FACULTY</th>
+                      <th>2-HR BLOCK</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.subjects.map((s) => (
+                      <tr key={s.id}>
+                        <div>
+                          <strong style={{ display: 'block', fontSize: 12 }}>{s.name}</strong>
+                          <span className="mono" style={{ fontSize: 10, color: 'var(--mist)' }}>{s.code}</span>
+                        </div>
+                        <td>{s.hours} hrs</td>
+                        <td>{s.teacher}</td>
+                        <td>
+                          <Badge tone={s.isDoubleBlock ? 'ember' : 'neutral'}>
+                            {s.isDoubleBlock ? '2-HR LAB/THEORY' : '1-HR'}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </Surface>
+
             <Surface className="publish-card">
-              <h3>Publish live timetable</h3>
-              <p>Push the latest valid schedule to Student and Teacher views. Publishing creates alerts only for changed domains.</p>
+              <h3>Publish Live Timetable</h3>
+              <p>Push the verified timetable to Student and Faculty views. Shared faculty and rooms are locked college-wide.</p>
               <Button tone="mist" icon={Send} onClick={publish}>
                 Publish Live Timetable
               </Button>
               {published && (
-                <div className="form-status">
+                <div className="form-status" style={{ marginTop: 12 }}>
                   <Check size={12} style={{ verticalAlign: 'middle', marginRight: 5 }} />
                   Published · {published}
                 </div>
               )}
             </Surface>
           </div>
+
           <div className="dashboard-stack">
             <Surface className="surface--dark solver-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
                 <div>
-                  <h3>Execution log</h3>
-                  <p>Deterministic constraint-satisfaction run.</p>
+                  <h3>Solver Execution Log</h3>
+                  <p>Deterministic Constraint-Satisfaction Run (MRV).</p>
                 </div>
                 <Activity size={17} color="#90C2E7" />
               </div>
+
               <div className="solver-stats">
                 <div className="solver-stat">
                   <strong>{solver ? solver.conflicts : '0'}</strong>
                   <span>CONFLICTS</span>
                 </div>
                 <div className="solver-stat">
-                  <strong>{solver ? solver.solveTime : '3.8ms'}</strong>
+                  <strong>{solver ? solver.solveTime : '28ms'}</strong>
                   <span>SOLVE TIME</span>
                 </div>
                 <div className="solver-stat">
@@ -1082,33 +1550,53 @@ function AdminDashboard() {
                   <span>BACKTRACKS</span>
                 </div>
               </div>
+
+              {/* Hybrid Coral Ember Bottleneck Diagnostics if any */}
+              {solver && !solver.success && solver.diagnostics && (
+                <div style={{ margin: '12px 0', padding: '10px 14px', background: 'rgba(224, 109, 83, 0.16)', border: '1px solid rgba(224, 109, 83, 0.45)', borderRadius: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#ff9e87', fontWeight: 700, fontSize: 11 }}>
+                    <AlertTriangle size={13} />
+                    <span>BOTTLENECK DIAGNOSTICS</span>
+                  </div>
+                  {solver.diagnostics.map((d, i) => (
+                    <p key={i} style={{ color: '#ffc2b3', fontSize: 11, margin: '4px 0 0' }}>
+                      • {d}
+                    </p>
+                  ))}
+                </div>
+              )}
+
               <div className="execution-log">
                 {solving ? (
                   <div className="log-line">[09:30:00.001] Evaluating domains via Minimum Remaining Values (MRV)…</div>
                 ) : solver ? (
-                  solver.log.map((line) => (
-                    <div className="log-line" key={line}>
+                  solver.log.map((line, idx) => (
+                    <div className="log-line" key={idx}>
                       {line}
                     </div>
                   ))
                 ) : (
                   <>
-                    <div className="log-line">[09:30:00.012] Last successful run</div>
-                    <div className="log-line">[09:30:00.014] 0 conflicts · 3.8ms · Backtracking (MRV)</div>
-                    <div className="log-line">[09:30:00.016] Ready for next solver run</div>
+                    <div className="log-line">[09:30:00.012] Multi-department constraints initialized: 4 theory halls, 4 faculty, 2 batches</div>
+                    <div className="log-line">[09:30:00.013] Dedicated campus lunch break (13:00–14:00) locked across all days</div>
+                    <div className="log-line">[09:30:00.014] Minimum Remaining Values (MRV) sorted tightest domain variables</div>
+                    <div className="log-line">[09:30:00.015] 0 conflicts · 28ms · Pure Backtracking CSP (MRV)</div>
+                    <div className="log-line">[09:30:00.016] Ready for college-wide publication</div>
                   </>
                 )}
               </div>
             </Surface>
+
             <Surface className="surface--dark publish-card">
-              <h3>Publication contract</h3>
+              <h3>Deterministic Publication Contract</h3>
               <p style={{ color: 'rgba(244,246,248,.57)' }}>
-                Role views consume only the most recent valid schedule. Unsolvable inputs stay private and return an exact bottleneck reason.
+                Role views consume only the latest mathematically verified schedule. Mathematical bottlenecks stay private with actionable diagnostics.
               </p>
               <div className="mono" style={{ color: 'rgba(244,246,248,.46)', fontSize: 9, lineHeight: 1.8 }}>
                 RBAC / ACTIVE<br />
                 ROOMS / {data.rooms.length.toString().padStart(2, '0')}<br />
-                BATCHES / {data.batches.length.toString().padStart(2, '0')}
+                BATCHES / {data.batches.length.toString().padStart(2, '0')}<br />
+                FACULTY / {data.faculty.length.toString().padStart(2, '0')}
               </div>
             </Surface>
           </div>
@@ -1139,6 +1627,6 @@ export default function App() {
   if (path === '/auth') return <AuthPage />
   if (path === '/dashboard/student') return <StudentDashboard />
   if (path === '/dashboard/teacher') return <TeacherDashboard />
-  if (path === '/dashboard/admin') return <AdminDashboard />
+  if (path === '/dashboard/admin' || path === '/dashboard/hod') return <HodDashboard />
   return <LandingPage />
 }

@@ -119,4 +119,11 @@ export function initDatabase() {
       is_read INTEGER NOT NULL DEFAULT 0
     );
   `);
+
+  try {
+    db.exec("ALTER TABLE time_slot_config ADD COLUMN college_name TEXT DEFAULT 'Apex Institute of Technology & Science'");
+  } catch {}
+  try {
+    db.exec("ALTER TABLE subjects ADD COLUMN is_double_block INTEGER DEFAULT 0");
+  } catch {}
 }

@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { seedDatabase } from './db/seeder.js';
+import { db } from './db/db.js';
 import authRoutes from './routes/auth.routes.js';
 import adminRoutes from './routes/admin.routes.js';
 import teacherRoutes from './routes/teacher.routes.js';
@@ -37,6 +38,113 @@ app.use('/api/teacher', teacherRoutes);
 app.use('/api/schedule', scheduleRoutes);
 app.use('/api/entities', entityRoutes);
 app.use('/api/alerts', alertRoutes);
+
+// Multi-Department & College Config Routes
+app.get('/api/departments', (req: Request, res: Response) => {
+  try {
+    const departments = db.prepare('SELECT * FROM departments').all() as any[];
+    const batches = db.prepare('SELECT * FROM batches').all() as any[];
+    let configRaw: any = null;
+    try {
+      configRaw = db.prepare('SELECT * FROM time_slot_config WHERE id = ?').get('default');
+    } catch {}
+    const collegeName = configRaw?.college_name || 'Apex Institute of Technology & Science';
+
+    res.json({
+      collegeName,
+      departments: departments.map((d: any) => ({
+        id: d.id,
+        name: d.name,
+        code: d.code,
+        facultyJoinCode: `${d.code}-FAC-2026`,
+        batches: batches
+          .filter((b: any) => b.department === d.name || b.department === d.code || b.department.includes(d.code))
+          .map((b: any) => ({
+            id: b.id,
+            name: b.name,
+            semester: b.semester,
+            section: b.name.includes('-') ? b.name.split('-')[1] : 'A',
+            studentCount: b.studentCount,
+          })),
+      })),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/departments', (req: Request, res: Response) => {
+  try {
+    const { name, code, workingDays, startTime, collegeName } = req.body;
+    if (!name || !code) {
+      res.status(400).json({ error: 'Department name and code are required' });
+      return;
+    }
+    const cleanCode = code.toUpperCase().trim();
+    const id = `dept-${cleanCode.toLowerCase()}`;
+    db.prepare('INSERT OR REPLACE INTO departments (id, name, code) VALUES (?, ?, ?)').run(id, name.trim(), cleanCode);
+
+    if (collegeName) {
+      try {
+        db.prepare('UPDATE time_slot_config SET college_name = ? WHERE id = ?').run(collegeName.trim(), 'default');
+      } catch {}
+    }
+    res.json({
+      id,
+      name,
+      code: cleanCode,
+      facultyJoinCode: `${cleanCode}-FAC-2026`,
+      message: 'Department registered successfully',
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/config', (req: Request, res: Response) => {
+  try {
+    const configRaw = db.prepare('SELECT * FROM time_slot_config WHERE id = ?').get('default') as any;
+    res.json({
+      collegeName: configRaw?.college_name || 'Apex Institute of Technology & Science',
+      workingDays: JSON.parse(configRaw?.working_days || '["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]'),
+      periodsPerDay: configRaw?.periods_per_day || 6,
+      periodDurationMinutes: configRaw?.period_duration_minutes || 50,
+      startTime: configRaw?.start_time || '09:00',
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/config', (req: Request, res: Response) => {
+  try {
+    const { collegeName, workingDays, periodsPerDay, periodDurationMinutes, startTime } = req.body;
+    if (collegeName) {
+      try {
+        db.prepare('UPDATE time_slot_config SET college_name = ? WHERE id = ?').run(collegeName.trim(), 'default');
+      } catch {}
+    }
+    if (workingDays || periodsPerDay || startTime) {
+      db.prepare(`
+        UPDATE time_slot_config SET 
+          working_days = COALESCE(?, working_days),
+          periods_per_day = COALESCE(?, periods_per_day),
+          period_duration_minutes = COALESCE(?, period_duration_minutes),
+          start_time = COALESCE(?, start_time)
+        WHERE id = ?
+      `).run(
+        workingDays ? JSON.stringify(workingDays) : null,
+        periodsPerDay || null,
+        periodDurationMinutes || null,
+        startTime || null,
+        'default'
+      );
+    }
+    res.json({ success: true, message: 'Configuration updated successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Health Check
 app.get('/api/health', (req: Request, res: Response) => {

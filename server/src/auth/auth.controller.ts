@@ -18,7 +18,7 @@ export class AuthController {
       }
 
       const rawRole = (role || 'STUDENT').toString().toUpperCase();
-      const userRole = ['ADMIN', 'TEACHER', 'STUDENT'].includes(rawRole) ? (rawRole as 'ADMIN' | 'TEACHER' | 'STUDENT') : 'STUDENT';
+      const userRole = (rawRole === 'HOD' || rawRole === 'ADMIN') ? 'ADMIN' : (rawRole === 'TEACHER' ? 'TEACHER' : 'STUDENT');
 
       const existing = AuthService.getUserByEmail(email);
       if (existing) {

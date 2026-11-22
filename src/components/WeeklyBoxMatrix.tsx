@@ -1,5 +1,5 @@
 import React from 'react'
-import { Calendar, Clock, MapPin, User, Users, Lock, Sparkles, AlertCircle, ArrowRight } from 'lucide-react'
+import { Calendar, Clock, MapPin, User, Users, Lock, Sparkles, AlertCircle, ArrowRight, Building } from 'lucide-react'
 import { ScheduleBlock } from '../services/api'
 import { Badge, cn } from './ui'
 
@@ -22,13 +22,22 @@ export const DAY_NAMES: Record<string, string> = {
   Fri: 'Friday',
 }
 
-export const TIME_PERIODS = [
-  { id: '09:00', label: '09:00', end: '10:00', period: 'P1' },
-  { id: '10:00', label: '10:00', end: '11:00', period: 'P2' },
-  { id: '11:00', label: '11:00', end: '12:00', period: 'P3' },
-  { id: '12:00', label: '12:00', end: '13:00', period: 'P4' },
-  { id: '13:00', label: '13:00', end: '14:00', period: 'P5' },
-  { id: '14:00', label: '14:00', end: '15:00', period: 'P6' },
+export interface TimePeriod {
+  id: string
+  label: string
+  end: string
+  period: string
+  isLunch?: boolean
+}
+
+export const TIME_PERIODS: TimePeriod[] = [
+  { id: '09:00', label: '09:00', end: '10:00', period: 'P1', isLunch: false },
+  { id: '10:00', label: '10:00', end: '11:00', period: 'P2', isLunch: false },
+  { id: '11:00', label: '11:00', end: '12:00', period: 'P3', isLunch: false },
+  { id: '12:00', label: '12:00', end: '13:00', period: 'P4', isLunch: false },
+  { id: '13:00', label: '13:00', end: '14:00', period: 'LUNCH', isLunch: true },
+  { id: '14:00', label: '14:00', end: '15:00', period: 'P5', isLunch: false },
+  { id: '15:00', label: '15:00', end: '16:00', period: 'P6', isLunch: false },
 ]
 
 export function WeeklyBoxMatrix({
@@ -56,115 +65,135 @@ export function WeeklyBoxMatrix({
         ))}
 
         {/* Rows: Time Period Cell + 5 Day Slots */}
-        {TIME_PERIODS.map(({ id: time, label, end, period }) => (
+        {TIME_PERIODS.map(({ id: time, label, end, period, isLunch }) => (
           <React.Fragment key={time}>
             {/* Time Slot Column Cell */}
-            <div className="box-matrix-time-cell">
-              <span className="time-period-tag">{period}</span>
+            <div className={cn('box-matrix-time-cell', isLunch && 'box-matrix-time-cell--lunch')}>
+              <span className={cn('time-period-tag', isLunch && 'time-period-tag--lunch')}>{period}</span>
               <strong className="time-start">{label}</strong>
               <span className="time-end">{end}</span>
             </div>
 
-            {/* 5 Day Slot Cells */}
-            {DAYS.map((day) => {
-              const key = `${day}-${time}`
-              const isBlocked = unavailableSlots.includes(key)
-              const block = blocks.find((b) => b.day === day && b.start === time)
-              const isLive =
-                block?.status === 'live' || (activeSlot.day === day && activeSlot.time === time && Boolean(block))
-              const isClash = block?.status === 'clash'
+            {/* If Lunch Recess: Render Locked Lunch Band Across All 5 Days */}
+            {isLunch ? (
+              DAYS.map((day) => (
+                <div key={`${day}-lunch`} className="box-tile box-tile--lunch" title="13:00 - 14:00 Campus Lunch Break">
+                  <div className="lunch-badge">
+                    <Lock size={10} />
+                    <span>LUNCH RECESS</span>
+                  </div>
+                  <span className="lunch-subtext">Protected Break</span>
+                </div>
+              ))
+            ) : (
+              /* Regular Period: 5 Day Slot Cells */
+              DAYS.map((day) => {
+                const key = `${day}-${time}`
+                const isBlocked = unavailableSlots.includes(key)
+                const block = blocks.find((b) => b.day === day && b.start === time)
+                const isLive =
+                  block?.status === 'live' || (activeSlot.day === day && activeSlot.time === time && Boolean(block))
+                const isClash = block?.status === 'clash'
 
-              // 1. Teacher Unavailable / Blocked Slot
-              if (mode === 'teacher' && isBlocked && !block) {
+                // 1. Teacher Unavailable / Blocked Slot
+                if (mode === 'teacher' && isBlocked && !block) {
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => onToggleSlot?.(day, time)}
+                      className="box-tile box-tile--blocked"
+                      title={`Click to unblock ${day} ${label}`}
+                    >
+                      <div className="blocked-badge">
+                        <Lock size={10} />
+                        <span>BLOCKED</span>
+                      </div>
+                      <span className="empty-subtext">Click to open</span>
+                    </button>
+                  )
+                }
+
+                // 2. Scheduled Class Box
+                if (block) {
+                  const subLabel =
+                    secondaryLabel === 'batch'
+                      ? block.batch
+                      : secondaryLabel === 'both'
+                      ? `${block.batch} · ${block.faculty.split(' ').slice(-1)[0]}`
+                      : block.faculty
+
+                  return (
+                    <div
+                      key={key}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onSelectBlock?.(block)}
+                      onKeyDown={(e) => e.key === 'Enter' && onSelectBlock?.(block)}
+                      className={cn(
+                        'box-tile box-tile--class',
+                        isLive && 'box-tile--live',
+                        isClash && 'box-tile--clash'
+                      )}
+                      title={`Click to view details for ${block.code} ${block.subject}`}
+                    >
+                      {/* Top line: Subject code + Room badge + Optional Dept badge */}
+                      <div className="box-tile__top">
+                        <span className="box-tile__code">{block.code}</span>
+                        <div className="flex items-center gap-1">
+                          {block.department && (
+                            <span className="box-tile__dept" title={`Department: ${block.department}`}>
+                              {block.department.split(' ')[0]}
+                            </span>
+                          )}
+                          <span className="box-tile__room">{block.room}</span>
+                        </div>
+                      </div>
+
+                      {/* Middle line: Short Subject Title */}
+                      <div className="box-tile__title" title={block.subject}>
+                        {block.subject}
+                      </div>
+
+                      {/* Bottom line: Muted faculty / batch + Live/Clash badge */}
+                      <div className="box-tile__bottom">
+                        <span className="box-tile__sub">{subLabel}</span>
+                        {isLive && (
+                          <span className="live-indicator">
+                            <span className="live-indicator-dot" />
+                            <span>LIVE</span>
+                          </span>
+                        )}
+                        {isClash && (
+                          <span className="clash-indicator">
+                            <AlertCircle size={9} />
+                            <span>CLASH</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                }
+
+                // 3. Empty / Free Slot Box
                 return (
                   <button
                     key={key}
                     type="button"
-                    onClick={() => onToggleSlot?.(day, time)}
-                    className="box-tile box-tile--blocked"
-                    title={`Click to unblock ${day} ${label}`}
+                    onClick={() => {
+                      if (mode === 'teacher') {
+                        onToggleSlot?.(day, time)
+                      }
+                    }}
+                    className={cn('box-tile box-tile--empty', mode === 'teacher' && 'cursor-pointer hover:border-mist')}
+                    title={mode === 'teacher' ? `Click to block ${day} ${label}` : `${day} ${label} is an open free hour`}
                   >
-                    <div className="blocked-badge">
-                      <Lock size={10} />
-                      <span>BLOCKED</span>
-                    </div>
-                    <span className="empty-subtext">Click to open</span>
+                    <span className="empty-label">{mode === 'teacher' ? '+ Open' : '— Free —'}</span>
+                    {mode === 'teacher' && <span className="empty-subtext">Click to block</span>}
                   </button>
                 )
-              }
-
-              // 2. Scheduled Class Box
-              if (block) {
-                const subLabel =
-                  secondaryLabel === 'batch'
-                    ? block.batch
-                    : secondaryLabel === 'both'
-                    ? `${block.batch} · ${block.faculty.split(' ').slice(-1)[0]}`
-                    : block.faculty
-
-                return (
-                  <div
-                    key={key}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onSelectBlock?.(block)}
-                    onKeyDown={(e) => e.key === 'Enter' && onSelectBlock?.(block)}
-                    className={cn(
-                      'box-tile box-tile--class',
-                      isLive && 'box-tile--live',
-                      isClash && 'box-tile--clash'
-                    )}
-                    title={`Click to view details for ${block.code} ${block.subject}`}
-                  >
-                    {/* Top line: Subject code + Room badge */}
-                    <div className="box-tile__top">
-                      <span className="box-tile__code">{block.code}</span>
-                      <span className="box-tile__room">{block.room}</span>
-                    </div>
-
-                    {/* Middle line: Short Subject Title */}
-                    <div className="box-tile__title" title={block.subject}>
-                      {block.subject}
-                    </div>
-
-                    {/* Bottom line: Muted faculty / batch + Live/Clash badge */}
-                    <div className="box-tile__bottom">
-                      <span className="box-tile__sub">{subLabel}</span>
-                      {isLive && (
-                        <span className="live-indicator">
-                          <span className="live-indicator-dot" />
-                          <span>LIVE</span>
-                        </span>
-                      )}
-                      {isClash && (
-                        <span className="clash-indicator">
-                          <AlertCircle size={9} />
-                          <span>CLASH</span>
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )
-              }
-
-              // 3. Empty / Free Slot Box
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => {
-                    if (mode === 'teacher') {
-                      onToggleSlot?.(day, time)
-                    }
-                  }}
-                  className={cn('box-tile box-tile--empty', mode === 'teacher' && 'cursor-pointer hover:border-mist')}
-                  title={mode === 'teacher' ? `Click to block ${day} ${label}` : `${day} ${label} is an open free hour`}
-                >
-                  <span className="empty-label">{mode === 'teacher' ? '+ Open' : '— Free —'}</span>
-                  {mode === 'teacher' && <span className="empty-subtext">Click to block</span>}
-                </button>
-              )
-            })}
+              })
+            )}
           </React.Fragment>
         ))}
       </div>
@@ -195,6 +224,12 @@ export function ClassDetailModal({
               <Badge tone={block.status === 'live' ? 'mist' : block.status === 'clash' ? 'ember' : 'neutral'}>
                 {block.status === 'live' ? 'LIVE NOW' : block.status === 'clash' ? 'CLASH DETECTED' : 'CONFIRMED'}
               </Badge>
+              {block.department && (
+                <Badge tone="mist">
+                  <Building size={10} className="inline mr-1" />
+                  {block.department}
+                </Badge>
+              )}
             </div>
             <h3>{block.subject}</h3>
             <p>
@@ -229,7 +264,7 @@ export function ClassDetailModal({
                 <Users size={11} className="inline mr-1 text-mist" /> BATCH DOMAIN
               </span>
               <strong>{block.batch}</strong>
-              <span className="detail-sub">Semester 5</span>
+              <span className="detail-sub">Semester Section</span>
             </div>
 
             <div className="detail-item">
