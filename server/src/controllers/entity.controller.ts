@@ -1,15 +1,27 @@
 import { Request, Response } from 'express';
 import { db } from '../db/db.js';
 import crypto from 'crypto';
+import { AuthenticatedRequest } from '../auth/auth.middleware.js';
+import {
+  DepartmentRow,
+  RoomRow,
+  TeacherRow,
+  TeacherDepartmentRow,
+  BatchRow,
+  SubjectRow,
+  CollegeConfigRow,
+  TimeSlotConfigRow,
+} from '../types/db.types.js';
 
 export class EntityController {
   static getAll(req: Request, res: Response): void {
     try {
-      const departments = db.prepare('SELECT * FROM departments').all();
-      const rooms = db.prepare('SELECT id, room_number as roomNumber, name, type, capacity, building, department_id as departmentId, is_shared as isShared FROM rooms').all();
+      const departments = db.prepare('SELECT * FROM departments').all() as DepartmentRow[];
+      const rooms = db.prepare('SELECT id, room_number as roomNumber, name, type, capacity, building, department_id as departmentId, is_shared as isShared FROM rooms').all() as (RoomRow & { roomNumber: string; departmentId: string | null; isShared: number })[];
       
-      const teachersRaw = db.prepare('SELECT id, name, short_code as shortCode, email, department, max_hours_per_day as maxHoursPerDay, max_hours_per_week as maxHoursPerWeek, unavailable_slots as unavailableSlots, color FROM teachers').all() as any[];
-      const teacherDepts = db.prepare('SELECT * FROM teacher_departments').all() as any[];
+      type TeacherQueryResult = TeacherRow & { shortCode: string; maxHoursPerDay: number; maxHoursPerWeek: number; unavailableSlots: string };
+      const teachersRaw = db.prepare('SELECT id, name, short_code as shortCode, email, department, max_hours_per_day as maxHoursPerDay, max_hours_per_week as maxHoursPerWeek, unavailable_slots as unavailableSlots, color FROM teachers').all() as TeacherQueryResult[];
+      const teacherDepts = db.prepare('SELECT * FROM teacher_departments').all() as TeacherDepartmentRow[];
 
       const teachers = teachersRaw.map((t) => {
         const depts = teacherDepts.filter((td) => td.teacher_id === t.id).map((td) => td.department_id);
@@ -21,21 +33,22 @@ export class EntityController {
         };
       });
 
-      const batchesRaw = db.prepare('SELECT id, name, department, department_id as departmentId, semester, section, student_count as studentCount, subject_ids as subjectIds FROM batches').all() as any[];
+      type BatchQueryResult = BatchRow & { departmentId: string; studentCount: number; subjectIds: string };
+      const batchesRaw = db.prepare('SELECT id, name, department, department_id as departmentId, semester, section, student_count as studentCount, subject_ids as subjectIds FROM batches').all() as BatchQueryResult[];
       const batches = batchesRaw.map((b) => ({
         ...b,
         subjectIds: JSON.parse(b.subjectIds || '[]'),
       }));
 
-      const subjects = db.prepare('SELECT id, code, name, type, weekly_hours as weeklyHours, duration_slots as durationSlots, assigned_teacher_id as assignedTeacherId, department_id as departmentId, preferred_room_type as preferredRoomType, allow_two_hour_block as allowTwoHourBlock, is_double_block as isDoubleBlock, color FROM subjects').all();
+      const subjects = db.prepare('SELECT id, code, name, type, weekly_hours as weeklyHours, duration_slots as durationSlots, assigned_teacher_id as assignedTeacherId, department_id as departmentId, preferred_room_type as preferredRoomType, allow_two_hour_block as allowTwoHourBlock, is_double_block as isDoubleBlock, color FROM subjects').all() as (SubjectRow & { weeklyHours: number; durationSlots: number; assignedTeacherId: string; departmentId: string | null; preferredRoomType: string | null; allowTwoHourBlock: number; isDoubleBlock: number })[];
 
       let collegeName = 'Apex Institute of Technology & Science';
       try {
-        const col = db.prepare('SELECT college_name FROM college_config WHERE id = ?').get('default') as any;
+        const col = db.prepare('SELECT college_name FROM college_config WHERE id = ?').get('default') as Pick<CollegeConfigRow, 'college_name'> | undefined;
         if (col?.college_name) collegeName = col.college_name;
       } catch {}
 
-      const configRaw = db.prepare('SELECT * FROM time_slot_config WHERE id = ?').get('default') as any;
+      const configRaw = db.prepare('SELECT * FROM time_slot_config WHERE id = ?').get('default') as TimeSlotConfigRow | undefined;
       const config = configRaw
         ? {
             collegeName,
@@ -56,15 +69,21 @@ export class EntityController {
         subjects,
         config,
       });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error fetching entities' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error fetching entities' });
     }
   }
 
   // Teacher CRUD
-  static createTeacher(req: Request, res: Response): void {
+  static createTeacher(req: AuthenticatedRequest, res: Response): void {
     try {
       const { name, shortCode, email, department, departmentId, maxHoursPerDay, maxHoursPerWeek, unavailableSlots, color } = req.body;
+      const adminDeptId = req.user?.departmentId;
+      const targetDeptId = departmentId || adminDeptId;
+      if (req.user?.role === 'ADMIN' && adminDeptId && targetDeptId && adminDeptId !== targetDeptId) {
+        res.status(403).json({ error: 'Cannot create teacher for another department' });
+        return;
+      }
       const id = `t-${crypto.randomUUID().slice(0, 8)}`;
       db.prepare(`
         INSERT INTO teachers (id, name, short_code, email, department, max_hours_per_day, max_hours_per_week, unavailable_slots, color)
@@ -86,8 +105,8 @@ export class EntityController {
       }
 
       res.status(201).json({ id, name, shortCode, email, department, maxHoursPerDay, maxHoursPerWeek, unavailableSlots, color });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error creating teacher' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error creating teacher' });
     }
   }
 
@@ -101,14 +120,23 @@ export class EntityController {
       }
       db.prepare('INSERT OR REPLACE INTO teacher_departments (teacher_id, department_id, is_primary) VALUES (?, ?, 0)').run(id, targetDepartmentId);
       res.json({ success: true, message: `Faculty shared with department ${targetDepartmentId}` });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error sharing teacher' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error sharing teacher' });
     }
   }
 
-  static updateTeacher(req: Request, res: Response): void {
+  static updateTeacher(req: AuthenticatedRequest, res: Response): void {
     try {
       const { id } = req.params;
+      const adminDeptId = req.user?.departmentId;
+      if (req.user?.role === 'ADMIN' && adminDeptId) {
+        const teacherMap = db.prepare('SELECT * FROM teacher_departments WHERE teacher_id = ? AND department_id = ?').get(id, adminDeptId);
+        const teacher = db.prepare('SELECT * FROM teachers WHERE id = ?').get(id) as TeacherRow | undefined;
+        if (!teacherMap && teacher && teacher.department && !teacher.department.toLowerCase().includes(adminDeptId.replace('dept-', ''))) {
+          res.status(403).json({ error: 'Cannot update teacher of another department' });
+          return;
+        }
+      }
       const { name, shortCode, email, department, maxHoursPerDay, maxHoursPerWeek, unavailableSlots, color } = req.body;
       db.prepare(`
         UPDATE teachers SET 
@@ -133,26 +161,40 @@ export class EntityController {
         id
       );
       res.json({ success: true, message: 'Teacher updated' });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error updating teacher' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error updating teacher' });
     }
   }
 
-  static deleteTeacher(req: Request, res: Response): void {
+  static deleteTeacher(req: AuthenticatedRequest, res: Response): void {
     try {
       const { id } = req.params;
+      const adminDeptId = req.user?.departmentId;
+      if (req.user?.role === 'ADMIN' && adminDeptId) {
+        const teacherMap = db.prepare('SELECT * FROM teacher_departments WHERE teacher_id = ? AND department_id = ?').get(id, adminDeptId);
+        const teacher = db.prepare('SELECT * FROM teachers WHERE id = ?').get(id) as TeacherRow | undefined;
+        if (!teacherMap && teacher && teacher.department && !teacher.department.toLowerCase().includes(adminDeptId.replace('dept-', ''))) {
+          res.status(403).json({ error: 'Cannot delete teacher of another department' });
+          return;
+        }
+      }
       db.prepare('DELETE FROM teacher_departments WHERE teacher_id = ?').run(id);
       db.prepare('DELETE FROM teachers WHERE id = ?').run(id);
       res.json({ success: true, message: 'Teacher deleted' });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error deleting teacher' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error deleting teacher' });
     }
   }
 
   // Room CRUD
-  static createRoom(req: Request, res: Response): void {
+  static createRoom(req: AuthenticatedRequest, res: Response): void {
     try {
       const { roomNumber, name, type, capacity, building, departmentId, isShared } = req.body;
+      const adminDeptId = req.user?.departmentId;
+      if (req.user?.role === 'ADMIN' && adminDeptId && departmentId && adminDeptId !== departmentId) {
+        res.status(403).json({ error: 'Cannot create room for another department' });
+        return;
+      }
       const id = `r-${crypto.randomUUID().slice(0, 8)}`;
       db.prepare(`
         INSERT INTO rooms (id, room_number, name, type, capacity, building, department_id, is_shared)
@@ -168,14 +210,24 @@ export class EntityController {
         isShared ? 1 : 0
       );
       res.status(201).json({ id, roomNumber, name, type, capacity, building, departmentId, isShared });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error creating room' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error creating room' });
     }
   }
 
-  static updateRoom(req: Request, res: Response): void {
+  static updateRoom(req: AuthenticatedRequest, res: Response): void {
     try {
       const { id } = req.params;
+      const adminDeptId = req.user?.departmentId;
+      const room = db.prepare('SELECT * FROM rooms WHERE id = ?').get(id) as RoomRow | undefined;
+      if (!room) {
+        res.status(404).json({ error: 'Room not found' });
+        return;
+      }
+      if (req.user?.role === 'ADMIN' && adminDeptId && room.department_id && adminDeptId !== room.department_id) {
+        res.status(403).json({ error: 'Cannot modify room belonging to another department' });
+        return;
+      }
       const { roomNumber, name, type, capacity, building, departmentId, isShared } = req.body;
       db.prepare(`
         UPDATE rooms SET
@@ -189,25 +241,40 @@ export class EntityController {
         WHERE id = ?
       `).run(roomNumber, name, type, capacity, building, departmentId, isShared !== undefined ? (isShared ? 1 : 0) : null, id);
       res.json({ success: true, message: 'Room updated' });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error updating room' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error updating room' });
     }
   }
 
-  static deleteRoom(req: Request, res: Response): void {
+  static deleteRoom(req: AuthenticatedRequest, res: Response): void {
     try {
       const { id } = req.params;
+      const adminDeptId = req.user?.departmentId;
+      const room = db.prepare('SELECT * FROM rooms WHERE id = ?').get(id) as RoomRow | undefined;
+      if (!room) {
+        res.status(404).json({ error: 'Room not found' });
+        return;
+      }
+      if (req.user?.role === 'ADMIN' && adminDeptId && room.department_id && adminDeptId !== room.department_id) {
+        res.status(403).json({ error: 'Cannot delete room belonging to another department' });
+        return;
+      }
       db.prepare('DELETE FROM rooms WHERE id = ?').run(id);
       res.json({ success: true, message: 'Room deleted' });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error deleting room' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error deleting room' });
     }
   }
 
   // Subject CRUD
-  static createSubject(req: Request, res: Response): void {
+  static createSubject(req: AuthenticatedRequest, res: Response): void {
     try {
       const { code, name, type, weeklyHours, durationSlots, assignedTeacherId, departmentId, preferredRoomType, allowTwoHourBlock, isDoubleBlock, color } = req.body;
+      const adminDeptId = req.user?.departmentId;
+      if (req.user?.role === 'ADMIN' && adminDeptId && departmentId && adminDeptId !== departmentId) {
+        res.status(403).json({ error: 'Cannot create subject for another department' });
+        return;
+      }
       const id = `sub-${crypto.randomUUID().slice(0, 8)}`;
       const hasDoubleBlock = allowTwoHourBlock || isDoubleBlock ? 1 : 0;
       db.prepare(`
@@ -228,14 +295,24 @@ export class EntityController {
         color || '#6366f1'
       );
       res.status(201).json({ id, code, name, type, weeklyHours, durationSlots, assignedTeacherId, departmentId, preferredRoomType, allowTwoHourBlock: Boolean(hasDoubleBlock), isDoubleBlock: Boolean(hasDoubleBlock), color });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error creating subject' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error creating subject' });
     }
   }
 
-  static updateSubject(req: Request, res: Response): void {
+  static updateSubject(req: AuthenticatedRequest, res: Response): void {
     try {
       const { id } = req.params;
+      const adminDeptId = req.user?.departmentId;
+      const subject = db.prepare('SELECT * FROM subjects WHERE id = ?').get(id) as SubjectRow | undefined;
+      if (!subject) {
+        res.status(404).json({ error: 'Subject not found' });
+        return;
+      }
+      if (req.user?.role === 'ADMIN' && adminDeptId && subject.department_id && adminDeptId !== subject.department_id) {
+        res.status(403).json({ error: 'Cannot modify subject belonging to another department' });
+        return;
+      }
       const { code, name, type, weeklyHours, durationSlots, assignedTeacherId, departmentId, preferredRoomType, allowTwoHourBlock, isDoubleBlock, color } = req.body;
       const hasDoubleBlock = allowTwoHourBlock !== undefined || isDoubleBlock !== undefined ? (allowTwoHourBlock || isDoubleBlock ? 1 : 0) : null;
       db.prepare(`
@@ -254,25 +331,40 @@ export class EntityController {
         WHERE id = ?
       `).run(code, name, type, weeklyHours, durationSlots, assignedTeacherId, departmentId, preferredRoomType, hasDoubleBlock, hasDoubleBlock, color, id);
       res.json({ success: true, message: 'Subject updated' });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error updating subject' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error updating subject' });
     }
   }
 
-  static deleteSubject(req: Request, res: Response): void {
+  static deleteSubject(req: AuthenticatedRequest, res: Response): void {
     try {
       const { id } = req.params;
+      const adminDeptId = req.user?.departmentId;
+      const subject = db.prepare('SELECT * FROM subjects WHERE id = ?').get(id) as SubjectRow | undefined;
+      if (!subject) {
+        res.status(404).json({ error: 'Subject not found' });
+        return;
+      }
+      if (req.user?.role === 'ADMIN' && adminDeptId && subject.department_id && adminDeptId !== subject.department_id) {
+        res.status(403).json({ error: 'Cannot delete subject belonging to another department' });
+        return;
+      }
       db.prepare('DELETE FROM subjects WHERE id = ?').run(id);
       res.json({ success: true, message: 'Subject deleted' });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error deleting subject' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error deleting subject' });
     }
   }
 
   // Batch CRUD
-  static createBatch(req: Request, res: Response): void {
+  static createBatch(req: AuthenticatedRequest, res: Response): void {
     try {
       const { name, department, departmentId, semester, section, studentCount, subjectIds } = req.body;
+      const adminDeptId = req.user?.departmentId;
+      if (req.user?.role === 'ADMIN' && adminDeptId && departmentId && adminDeptId !== departmentId) {
+        res.status(403).json({ error: 'Cannot create batch for another department' });
+        return;
+      }
       const id = `batch-${crypto.randomUUID().slice(0, 8)}`;
       db.prepare(`
         INSERT INTO batches (id, name, department, department_id, semester, section, student_count, subject_ids)
@@ -288,14 +380,24 @@ export class EntityController {
         JSON.stringify(subjectIds || [])
       );
       res.status(201).json({ id, name, department, departmentId, semester, section, studentCount, subjectIds });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error creating batch' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error creating batch' });
     }
   }
 
-  static updateBatch(req: Request, res: Response): void {
+  static updateBatch(req: AuthenticatedRequest, res: Response): void {
     try {
       const { id } = req.params;
+      const adminDeptId = req.user?.departmentId;
+      const batch = db.prepare('SELECT * FROM batches WHERE id = ?').get(id) as BatchRow | undefined;
+      if (!batch) {
+        res.status(404).json({ error: 'Batch not found' });
+        return;
+      }
+      if (req.user?.role === 'ADMIN' && adminDeptId && batch.department_id && adminDeptId !== batch.department_id) {
+        res.status(403).json({ error: 'Cannot modify batch belonging to another department' });
+        return;
+      }
       const { name, department, departmentId, semester, section, studentCount, subjectIds } = req.body;
       db.prepare(`
         UPDATE batches SET
@@ -309,18 +411,28 @@ export class EntityController {
         WHERE id = ?
       `).run(name, department, departmentId, semester, section, studentCount, subjectIds !== undefined ? JSON.stringify(subjectIds) : null, id);
       res.json({ success: true, message: 'Batch updated' });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error updating batch' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error updating batch' });
     }
   }
 
-  static deleteBatch(req: Request, res: Response): void {
+  static deleteBatch(req: AuthenticatedRequest, res: Response): void {
     try {
       const { id } = req.params;
+      const adminDeptId = req.user?.departmentId;
+      const batch = db.prepare('SELECT * FROM batches WHERE id = ?').get(id) as BatchRow | undefined;
+      if (!batch) {
+        res.status(404).json({ error: 'Batch not found' });
+        return;
+      }
+      if (req.user?.role === 'ADMIN' && adminDeptId && batch.department_id && adminDeptId !== batch.department_id) {
+        res.status(403).json({ error: 'Cannot delete batch belonging to another department' });
+        return;
+      }
       db.prepare('DELETE FROM batches WHERE id = ?').run(id);
       res.json({ success: true, message: 'Batch deleted' });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error deleting batch' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error deleting batch' });
     }
   }
 
@@ -343,8 +455,8 @@ export class EntityController {
         JSON.stringify(breakSlots || [])
       );
       res.json({ success: true, message: 'Time slot configuration updated' });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error updating config' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error updating config' });
     }
   }
 }

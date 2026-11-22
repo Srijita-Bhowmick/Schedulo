@@ -1,0 +1,1 @@
+export { ClassDetailModal } from '../WeeklyBoxMatrix'

@@ -150,6 +150,38 @@ export function overlapsLunchBreak(startMinute: number, endMinute: number): bool
   return isMinuteOverlap(startMinute, endMinute, LUNCH_START_MINUTE, LUNCH_END_MINUTE);
 }
 
+export function createsExcessiveConsecutiveClasses(
+  existingIntervals: Array<{ startMinute: number; endMinute: number }>,
+  newStart: number,
+  newEnd: number,
+  maxContinuousMinutes = 120
+): boolean {
+  if (existingIntervals.length === 0) return (newEnd - newStart) > maxContinuousMinutes;
+  const all = [
+    ...existingIntervals.map((i) => ({ start: i.startMinute, end: i.endMinute })),
+    { start: newStart, end: newEnd },
+  ];
+  all.sort((a, b) => a.start - b.start);
+
+  let currentStart = all[0].start;
+  let currentEnd = all[0].end;
+
+  for (let i = 1; i < all.length; i++) {
+    const next = all[i];
+    if (next.start - currentEnd <= 15) {
+      currentEnd = Math.max(currentEnd, next.end);
+    } else {
+      if (currentEnd - currentStart > maxContinuousMinutes) {
+        return true;
+      }
+      currentStart = next.start;
+      currentEnd = next.end;
+    }
+  }
+
+  return currentEnd - currentStart > maxContinuousMinutes;
+}
+
 export class BacktrackingSolver {
   /**
    * Deterministic Backtracking CSP Solver using:
@@ -238,6 +270,16 @@ export class BacktrackingSolver {
       if (totalTeachingHours > maxTheoreticalAcrossDays) {
         diagnosticErrors.push(
           `Teacher Daily Cap Bottleneck: Faculty '${teacher.name}' (${teacher.shortCode}) requires ${totalTeachingHours} teaching hours, but their daily max of ${teacher.maxHoursPerDay} hrs/day across ${workingDays.length} days permits at most ${maxTheoreticalAcrossDays} hours.`
+        );
+      }
+    }
+
+    // Pigeonhole Check: Subject weekly hours vs working days
+    for (const sub of subjects) {
+      const allowsDouble = Boolean(sub.allowTwoHourBlock || sub.isDoubleBlock);
+      if (sub.weeklyHours > workingDays.length && !allowsDouble) {
+        diagnosticErrors.push(
+          `Subject Pigeonhole Bottleneck: Subject '${sub.code}' (${sub.name}) requires ${sub.weeklyHours} hours/week, but department has only ${workingDays.length} working days and 2-hour blocks are disabled.`
         );
       }
     }
@@ -394,14 +436,23 @@ export class BacktrackingSolver {
       const teacher = teacherMap.get(unit.teacherId);
       const batch = batchMap.get(unit.batchId);
       const validRooms = rooms.filter((r) => r.capacity >= (batch?.studentCount || 0));
+      const durationSlots = unit.durationSlots || 1;
+      const spanMinutes = durationSlots * periodDurationMins;
 
       const domains: DomainSlot[] = [];
 
       for (const slot of allSlotCoordinates) {
         constraintsChecked++;
 
-        // 1. Check fixed lunch break overlap
-        if (overlapsLunchBreak(slot.startMinute, slot.endMinute)) {
+        // Ensure 2-hour block does not exceed department's periods per day
+        if (slot.periodIndex + durationSlots > periodsPerDay) {
+          continue;
+        }
+
+        const spanEndMinute = slot.startMinute + spanMinutes;
+
+        // 1. Check fixed lunch break overlap across the entire span
+        if (overlapsLunchBreak(slot.startMinute, spanEndMinute)) {
           continue;
         }
 
@@ -414,17 +465,17 @@ export class BacktrackingSolver {
         // 3. Check teacher daily cap
         const tDayKey = `${unit.teacherId}_${slot.day}`;
         const currentTeacherDaily = teacherDailyHours.get(tDayKey) || 0;
-        if (teacher && currentTeacherDaily + unit.durationSlots > teacher.maxHoursPerDay) {
+        if (teacher && currentTeacherDaily + durationSlots > teacher.maxHoursPerDay) {
           continue;
         }
 
-        // 4. Check teacher unavailable slots
+        // 4. Check teacher unavailable slots across entire span
         if (teacher && teacher.unavailableSlots) {
           const isUnavailable = teacher.unavailableSlots.some((u) => {
             if (u.day !== slot.day) return false;
-            if (u.periodIndex !== undefined && u.periodIndex === slot.periodIndex) return true;
+            if (u.periodIndex !== undefined && (u.periodIndex >= slot.periodIndex && u.periodIndex < slot.periodIndex + durationSlots)) return true;
             if (u.startMinute !== undefined && u.endMinute !== undefined) {
-              return isMinuteOverlap(slot.startMinute, slot.endMinute, u.startMinute, u.endMinute);
+              return isMinuteOverlap(slot.startMinute, spanEndMinute, u.startMinute, u.endMinute);
             }
             return false;
           });
@@ -438,7 +489,7 @@ export class BacktrackingSolver {
         const teacherOverlap = existingOnDay.some(
           (ex) =>
             ex.teacherId === unit.teacherId &&
-            isMinuteOverlap(slot.startMinute, slot.endMinute, ex.startMinute, ex.endMinute)
+            isMinuteOverlap(slot.startMinute, spanEndMinute, ex.startMinute, ex.endMinute)
         );
         if (teacherOverlap) continue;
 
@@ -446,24 +497,13 @@ export class BacktrackingSolver {
         const batchOverlap = existingOnDay.some(
           (ex) =>
             ex.batchId === unit.batchId &&
-            isMinuteOverlap(slot.startMinute, slot.endMinute, ex.startMinute, ex.endMinute)
+            isMinuteOverlap(slot.startMinute, spanEndMinute, ex.startMinute, ex.endMinute)
         );
         if (batchOverlap) continue;
 
-        // Max 2 consecutive classes in a row check for teacher:
-        // Find if teacher already has classes in periodIndex - 1 and periodIndex - 2, or periodIndex + 1 and periodIndex + 2
-        const teacherPeriodsOnDay = existingOnDay
-          .filter((ex) => ex.teacherId === unit.teacherId)
-          .map((ex) => ex.periodIndex);
-
-        if (
-          (teacherPeriodsOnDay.includes(slot.periodIndex - 1) &&
-            teacherPeriodsOnDay.includes(slot.periodIndex - 2)) ||
-          (teacherPeriodsOnDay.includes(slot.periodIndex + 1) &&
-            teacherPeriodsOnDay.includes(slot.periodIndex + 2)) ||
-          (teacherPeriodsOnDay.includes(slot.periodIndex - 1) &&
-            teacherPeriodsOnDay.includes(slot.periodIndex + 1))
-        ) {
+        // Max 2 consecutive classes in a row check for teacher using physical minute proximity:
+        const teacherIntervalsOnDay = existingOnDay.filter((ex) => ex.teacherId === unit.teacherId);
+        if (createsExcessiveConsecutiveClasses(teacherIntervalsOnDay, slot.startMinute, spanEndMinute, 120)) {
           continue;
         }
 
@@ -472,14 +512,14 @@ export class BacktrackingSolver {
           const roomOverlap = existingOnDay.some(
             (ex) =>
               ex.roomId === room.id &&
-              isMinuteOverlap(slot.startMinute, slot.endMinute, ex.startMinute, ex.endMinute)
+              isMinuteOverlap(slot.startMinute, spanEndMinute, ex.startMinute, ex.endMinute)
           );
           if (!roomOverlap) {
             domains.push({
               day: slot.day,
               periodIndex: slot.periodIndex,
               startMinute: slot.startMinute,
-              endMinute: slot.endMinute,
+              endMinute: spanEndMinute,
               roomId: room.id,
             });
           }

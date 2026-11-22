@@ -8,6 +8,7 @@ const router = Router();
 router.use(authenticateToken);
 router.use(requireRole('ADMIN'));
 
+router.get('/department/join-code', AdminController.getDepartmentJoinCode);
 router.post('/generate', AdminController.generateSchedule);
 router.post('/solve', AdminController.generateSchedule);
 router.post('/publish', AdminController.publishTimetable);

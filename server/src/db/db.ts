@@ -1,12 +1,11 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const DB_DIR = typeof __dirname !== 'undefined'
+  ? path.resolve(__dirname, '../../data')
+  : path.resolve(process.cwd(), 'data');
 
-const DB_DIR = path.resolve(__dirname, '../../data');
 if (!fs.existsSync(DB_DIR)) {
   fs.mkdirSync(DB_DIR, { recursive: true });
 }
@@ -64,7 +63,8 @@ export function initDatabase() {
       capacity INTEGER NOT NULL,
       building TEXT,
       department_id TEXT,
-      is_shared INTEGER NOT NULL DEFAULT 0
+      is_shared INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL
     );
 
     -- 5. Faculty Members
@@ -85,7 +85,9 @@ export function initDatabase() {
       teacher_id TEXT NOT NULL,
       department_id TEXT NOT NULL,
       is_primary INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (teacher_id, department_id)
+      PRIMARY KEY (teacher_id, department_id),
+      FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE,
+      FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
     );
 
     -- 7. Batches (Semester + Section per Department)
@@ -97,7 +99,8 @@ export function initDatabase() {
       semester INTEGER NOT NULL,
       section TEXT NOT NULL DEFAULT 'A',
       student_count INTEGER NOT NULL,
-      subject_ids TEXT NOT NULL DEFAULT '[]'
+      subject_ids TEXT NOT NULL DEFAULT '[]',
+      FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL
     );
 
     -- 8. Theory Subjects (with 2-Hour Continuous Theory Block toggle)
@@ -113,7 +116,9 @@ export function initDatabase() {
       preferred_room_type TEXT DEFAULT 'LECTURE_HALL',
       allow_two_hour_block INTEGER NOT NULL DEFAULT 0,
       is_double_block INTEGER NOT NULL DEFAULT 0,
-      color TEXT
+      color TEXT,
+      FOREIGN KEY (assigned_teacher_id) REFERENCES teachers(id) ON DELETE CASCADE,
+      FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL
     );
 
     -- 9. Legacy Time Slot Config Compatibility
@@ -140,7 +145,12 @@ export function initDatabase() {
       room_id TEXT NOT NULL,
       department_id TEXT,
       duration_slots INTEGER NOT NULL DEFAULT 1,
-      is_locked INTEGER NOT NULL DEFAULT 0
+      is_locked INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
+      FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE,
+      FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE,
+      FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE,
+      FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
     );
 
     -- 11. Weekly Reschedule Overrides ("This Week Only" Temporary Substitution)
@@ -158,7 +168,9 @@ export function initDatabase() {
       batch_id TEXT NOT NULL,
       valid_for_week TEXT NOT NULL,
       is_this_week_only INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE,
+      FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE
     );
 
     -- 12. Schedule Alerts
@@ -177,7 +189,9 @@ export function initDatabase() {
       target_role TEXT NOT NULL DEFAULT 'STUDENT',
       valid_for_week TEXT,
       created_at TEXT NOT NULL,
-      is_read INTEGER NOT NULL DEFAULT 0
+      is_read INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE,
+      FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE
     );
   `);
 

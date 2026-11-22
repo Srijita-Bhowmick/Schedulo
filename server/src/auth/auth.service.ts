@@ -7,6 +7,11 @@ import { db } from '../db/db.js';
 export const JWT_SECRET = process.env.JWT_SECRET || 'schedulo-super-secret-jwt-key-2026';
 export const PRE_2FA_SECRET = process.env.PRE_2FA_SECRET || 'schedulo-pre-2fa-temp-secret-key-2026';
 
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || !process.env.PRE_2FA_SECRET)) {
+  console.error('FATAL: JWT_SECRET and PRE_2FA_SECRET must be defined in production environment.');
+  process.exit(1);
+}
+
 // Configure authenticator options
 authenticator.options = {
   window: 1, // Allow 1 step before / after for clock drift (RFC-6238)

@@ -1,6 +1,6 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, RoundedBox } from '@react-three/drei'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import * as THREE from 'three'
 import { Button } from './ui'
@@ -137,6 +137,12 @@ function TimetableTile({
   const activeTone = solved && tone === 'ember' ? 'mist' : tone
   const texture = useMemo(() => createTileTexture(label, activeTone), [label, activeTone])
 
+  useEffect(() => {
+    return () => {
+      texture.dispose()
+    }
+  }, [texture])
+
   useFrame((_, delta) => {
     if (!mesh.current) return
     mesh.current.position.x = THREE.MathUtils.damp(mesh.current.position.x, target[0], 3.2, delta)
@@ -172,6 +178,19 @@ function TimetableTile({
 
 function ClashPulse({ solved }: { solved: boolean }) {
   const ring = useRef<THREE.Mesh>(null)
+
+  useEffect(() => {
+    return () => {
+      if (ring.current) {
+        ring.current.geometry.dispose()
+        if (Array.isArray(ring.current.material)) {
+          ring.current.material.forEach((m) => m.dispose())
+        } else if (ring.current.material) {
+          ring.current.material.dispose()
+        }
+      }
+    }
+  }, [])
   useFrame((state) => {
     if (!ring.current) return
     const pulse = solved ? 0 : 1 + Math.sin(state.clock.elapsedTime * 3.2) * 0.08

@@ -10,16 +10,61 @@ import {
   BatchData,
   SubjectData,
 } from '../engine/backtrackingSolver.js';
+import {
+  DepartmentRow,
+  TeacherRow,
+  BatchRow,
+  ScheduleEntryRow,
+  CountResult,
+} from '../types/db.types.js';
 import crypto from 'crypto';
 
 export class AdminController {
+  /**
+   * Get faculty join code for the authenticated HOD's department
+   */
+  static getDepartmentJoinCode(req: AuthenticatedRequest, res: Response): void {
+    try {
+      const deptId = req.query.departmentId?.toString() || req.user?.departmentId;
+      if (!deptId) {
+        res.status(400).json({ error: 'Department ID is required' });
+        return;
+      }
+
+      if (req.user?.role === 'ADMIN' && req.user.departmentId && req.user.departmentId !== deptId) {
+        res.status(403).json({ error: 'Cannot access join code for another department' });
+        return;
+      }
+
+      const dept = db.prepare('SELECT id, name, code, faculty_join_code as facultyJoinCode FROM departments WHERE id = ?').get(deptId) as (Pick<DepartmentRow, 'id' | 'name' | 'code'> & { facultyJoinCode: string }) | undefined;
+      if (!dept) {
+        res.status(404).json({ error: 'Department not found' });
+        return;
+      }
+
+      res.json({
+        departmentId: dept.id,
+        name: dept.name,
+        code: dept.code,
+        facultyJoinCode: dept.facultyJoinCode,
+      });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error fetching join code' });
+    }
+  }
+
   /**
    * Run the deterministic backtracking solver (MRV + Forward checking + Exact minute intervals)
    */
   static generateSchedule(req: AuthenticatedRequest, res: Response): void {
     try {
       const targetDeptId = req.body.departmentId || req.user?.departmentId || 'dept-cse';
-      const deptRow = db.prepare('SELECT * FROM departments WHERE id = ?').get(targetDeptId) as any;
+      if (req.user?.role === 'ADMIN' && req.user.departmentId && req.user.departmentId !== targetDeptId) {
+        res.status(403).json({ error: 'Cannot generate schedule for another department' });
+        return;
+      }
+
+      const deptRow = db.prepare('SELECT * FROM departments WHERE id = ?').get(targetDeptId) as DepartmentRow | undefined;
 
       const deptConfig: DepartmentConfig = deptRow
         ? {
@@ -49,6 +94,7 @@ export class AdminController {
       `).all(deptConfig.id) as RoomData[];
 
       // Available teachers: faculty who teach in this department
+      type TeacherQueryResult = TeacherRow & { shortCode: string; maxHoursPerDay: number; maxHoursPerWeek: number; unavailableSlots: string };
       const teachersRaw = db.prepare(`
         SELECT t.id, t.name, t.short_code as shortCode, t.email, t.department, 
                t.max_hours_per_day as maxHoursPerDay, t.max_hours_per_week as maxHoursPerWeek, 
@@ -56,19 +102,23 @@ export class AdminController {
         FROM teachers t
         LEFT JOIN teacher_departments td ON t.id = td.teacher_id
         WHERE td.department_id = ? OR t.department = ?
-      `).all(deptConfig.id, deptConfig.name) as any[];
+      `).all(deptConfig.id, deptConfig.name) as TeacherQueryResult[];
 
       const teachers: TeacherData[] = teachersRaw.map((t) => ({
         ...t,
+        email: t.email || undefined,
+        department: t.department || undefined,
+        color: t.color || undefined,
         unavailableSlots: JSON.parse(t.unavailableSlots || '[]'),
       }));
 
       // Batches for this department
+      type BatchQueryResult = BatchRow & { departmentId: string; studentCount: number; subjectIds: string };
       const batchesRaw = db.prepare(`
         SELECT id, name, department, department_id as departmentId, semester, section, student_count as studentCount, subject_ids as subjectIds
         FROM batches
         WHERE department_id = ? OR department = ?
-      `).all(deptConfig.id, deptConfig.name) as any[];
+      `).all(deptConfig.id, deptConfig.name) as BatchQueryResult[];
 
       const batches: BatchData[] = batchesRaw.map((b) => ({
         ...b,
@@ -78,8 +128,8 @@ export class AdminController {
       // Subjects for this department
       const subjects = db.prepare(`
         SELECT id, code, name, type, weekly_hours as weeklyHours, duration_slots as durationSlots,
-               assigned_teacher_id as assignedTeacherId, department_id as departmentId, preferred_room_type as preferredRoomType,
-               allow_two_hour_block as allowTwoHourBlock, is_double_block as isDoubleBlock, color
+                assigned_teacher_id as assignedTeacherId, department_id as departmentId, preferred_room_type as preferredRoomType,
+                allow_two_hour_block as allowTwoHourBlock, is_double_block as isDoubleBlock, color
         FROM subjects
         WHERE department_id = ? OR id IN (${batches.flatMap((b) => b.subjectIds).map(() => '?').join(',') || "''"})
       `).all(deptConfig.id, ...batches.flatMap((b) => b.subjectIds)) as SubjectData[];
@@ -87,8 +137,8 @@ export class AdminController {
       // Locked entries from other departments (so shared professors and shared lecture halls never conflict)
       const lockedEntries = db.prepare(`
         SELECT id, day, period_index as periodIndex, start_minute as startMinute, end_minute as endMinute,
-               batch_id as batchId, subject_id as subjectId, teacher_id as teacherId, room_id as roomId,
-               duration_slots as durationSlots, is_locked as isLocked, department_id as departmentId
+                batch_id as batchId, subject_id as subjectId, teacher_id as teacherId, room_id as roomId,
+                duration_slots as durationSlots, is_locked as isLocked, department_id as departmentId
         FROM schedule_entries
         WHERE department_id != ? AND is_locked = 1
       `).all(deptConfig.id) as ScheduleEntryData[];
@@ -116,8 +166,8 @@ export class AdminController {
 
       // Update schedule_entries for this department in a transaction
       const updateTransaction = db.transaction((newEntries: ScheduleEntryData[]) => {
-        // Delete all non-locked entries for this department
-        db.prepare('DELETE FROM schedule_entries WHERE department_id = ? AND is_locked = 0').run(deptConfig.id);
+        // Delete all previous entries for this department (clean regeneration)
+        db.prepare('DELETE FROM schedule_entries WHERE department_id = ?').run(deptConfig.id);
 
         const insertStmt = db.prepare(`
           INSERT OR REPLACE INTO schedule_entries 
@@ -154,9 +204,9 @@ export class AdminController {
         telemetry: result.telemetry,
         entries: result.entries,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Schedule generation error:', err);
-      res.status(500).json({ error: err.message || 'Error generating schedule' });
+      res.status(500).json({ error: (err as Error).message || 'Error generating schedule' });
     }
   }
 
@@ -166,6 +216,10 @@ export class AdminController {
   static publishTimetable(req: AuthenticatedRequest, res: Response): void {
     try {
       const targetDeptId = req.body.departmentId || req.user?.departmentId || 'dept-cse';
+      if (req.user?.role === 'ADMIN' && req.user.departmentId && req.user.departmentId !== targetDeptId) {
+        res.status(403).json({ error: 'Cannot publish schedule for another department' });
+        return;
+      }
       
       // Lock all entries for this department
       db.prepare('UPDATE schedule_entries SET is_locked = 1 WHERE department_id = ?').run(targetDeptId);
@@ -187,8 +241,8 @@ export class AdminController {
         );
       } catch {}
 
-      const studentCount = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'STUDENT'").get() as any;
-      const teacherCount = db.prepare("SELECT COUNT(*) as count FROM teachers").get() as any;
+      const studentCount = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'STUDENT'").get() as CountResult | undefined;
+      const teacherCount = db.prepare("SELECT COUNT(*) as count FROM teachers").get() as CountResult | undefined;
       const totalRecipients = (studentCount?.count || 100) + (teacherCount?.count || 18);
 
       res.json({
@@ -197,8 +251,8 @@ export class AdminController {
         recipients: totalRecipients,
         message: `Timetable published successfully. ${totalRecipients} recipients notified. Shared intervals locked college-wide.`,
       });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error publishing timetable' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error publishing timetable' });
     }
   }
 
@@ -208,9 +262,14 @@ export class AdminController {
   static toggleLock(req: AuthenticatedRequest, res: Response): void {
     try {
       const { entryId } = req.params;
-      const entry = db.prepare('SELECT * FROM schedule_entries WHERE id = ?').get(entryId) as any;
+      const entry = db.prepare('SELECT * FROM schedule_entries WHERE id = ?').get(entryId) as ScheduleEntryRow | undefined;
       if (!entry) {
         res.status(404).json({ error: 'Entry not found' });
+        return;
+      }
+
+      if (req.user?.role === 'ADMIN' && req.user.departmentId && entry.department_id && req.user.departmentId !== entry.department_id) {
+        res.status(403).json({ error: 'Cannot modify schedule entry belonging to another department' });
         return;
       }
 
@@ -218,8 +277,8 @@ export class AdminController {
       db.prepare('UPDATE schedule_entries SET is_locked = ? WHERE id = ?').run(nextLock, entryId);
 
       res.json({ success: true, isLocked: Boolean(nextLock) });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error toggling lock' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error toggling lock' });
     }
   }
 
@@ -228,10 +287,15 @@ export class AdminController {
    */
   static clearSchedule(req: AuthenticatedRequest, res: Response): void {
     try {
-      db.prepare('DELETE FROM schedule_entries WHERE is_locked = 0').run();
+      const targetDeptId = req.body.departmentId || req.user?.departmentId;
+      if (targetDeptId) {
+        db.prepare('DELETE FROM schedule_entries WHERE department_id = ? AND is_locked = 0').run(targetDeptId);
+      } else {
+        db.prepare('DELETE FROM schedule_entries WHERE is_locked = 0').run();
+      }
       res.json({ success: true, message: 'All unlocked schedule slots cleared.' });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error clearing schedule' });
+    } catch (err: unknown) {
+      res.status(500).json({ error: (err as Error).message || 'Error clearing schedule' });
     }
   }
 }

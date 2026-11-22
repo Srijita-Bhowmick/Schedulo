@@ -190,7 +190,7 @@ export class AuthController {
         userId,
         email: email.toLowerCase().trim(),
         role: userRole,
-        totpSecret: secret,
+        manualSetupKey: secret,
         otpauthUrl,
         qrCodeDataUrl,
         facultyJoinCode: generatedJoinCode,
@@ -260,11 +260,8 @@ export class AuthController {
       }
 
       let user = AuthService.getUserByEmail(emailOrUser);
-      if (!user) {
+      if (!user && !emailOrUser.includes('@')) {
         user = AuthService.getUserByEmail(`${emailOrUser}@schedulo.edu`);
-      }
-      if (!user) {
-        user = db.prepare('SELECT * FROM users WHERE LOWER(email) LIKE LOWER(?) OR LOWER(name) LIKE LOWER(?)').get(`%${emailOrUser}%`, `%${emailOrUser}%`) as any;
       }
 
       if (!user) {
@@ -286,7 +283,6 @@ export class AuthController {
           error: 'Account not yet activated. Please complete initial TOTP 2FA verification.',
           requiresRegistrationVerification: true,
           email: user.email,
-          totpSecret: user.totp_secret,
           otpauthUrl,
           qrCodeDataUrl,
         });
@@ -413,16 +409,6 @@ export class AuthController {
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to fetch user' });
-    }
-  }
-
-  static getDevTotp(req: Request, res: Response): void {
-    try {
-      const secret = req.params.secret || 'JBSWY3DPEHPK3PXP';
-      const token = authenticator.generate(secret);
-      res.json({ token, secret });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
     }
   }
 }

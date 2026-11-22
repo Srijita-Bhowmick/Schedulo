@@ -10,6 +10,7 @@ import scheduleRoutes from './routes/schedule.routes.js';
 import entityRoutes from './routes/entity.routes.js';
 import alertRoutes from './routes/alert.routes.js';
 import { authenticator } from 'otplib';
+import { authenticateToken, requireRole } from './auth/auth.middleware.js';
 
 dotenv.config();
 
@@ -56,7 +57,6 @@ app.get('/api/departments', (req: Request, res: Response) => {
         id: d.id,
         name: d.name,
         code: d.code,
-        facultyJoinCode: `${d.code}-FAC-2026`,
         batches: batches
           .filter((b: any) => b.department === d.name || b.department === d.code || b.department.includes(d.code))
           .map((b: any) => ({
@@ -73,7 +73,7 @@ app.get('/api/departments', (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/departments', (req: Request, res: Response) => {
+app.post('/api/departments', authenticateToken, requireRole('ADMIN'), (req: Request, res: Response) => {
   try {
     const { name, code, workingDays, startTime, collegeName } = req.body;
     if (!name || !code) {
@@ -116,7 +116,7 @@ app.get('/api/config', (req: Request, res: Response) => {
   }
 });
 
-app.put('/api/config', (req: Request, res: Response) => {
+app.put('/api/config', authenticateToken, requireRole('ADMIN'), (req: Request, res: Response) => {
   try {
     const { collegeName, workingDays, periodsPerDay, periodDurationMinutes, startTime } = req.body;
     if (collegeName) {
@@ -154,18 +154,6 @@ app.get('/api/health', (req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
     engine: 'Pure Deterministic Backtracking CSP (MRV)',
   });
-});
-
-// Helper for testing/dev: Generate current TOTP code for a secret
-app.get('/api/auth/dev-totp/:secret', (req: Request, res: Response) => {
-  try {
-    const { secret } = req.params;
-    const token = authenticator.generate(secret);
-    const timeRemaining = 30 - Math.floor((Date.now() / 1000) % 30);
-    res.json({ secret, token, timeRemaining });
-  } catch (err: any) {
-    res.status(400).json({ error: 'Invalid secret format' });
-  }
 });
 
 // 404 Handler

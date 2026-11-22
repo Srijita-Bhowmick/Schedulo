@@ -1,12 +1,32 @@
-node_modules
-dist
-dist-ssr
+# Dependencies
+node_modules/
+server/node_modules/
+
+# Production Builds
+dist/
+server/dist/
+dist-ssr/
+
+# Environment and Secrets
+.env
+.env.*
+*.env
+server/.env
+
+# Local Databases and WAL files
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+server/data/*.sqlite
+server/data/*.sqlite-wal
+server/data/*.sqlite-shm
+data/
+
+# Editor and Tooling caches
 *.local
 .vscode/
 *.tsbuildinfo
 .DS_Store
-
-*.sqlite
-*.sqlite-wal
-*.sqlite-shm
-server/dist

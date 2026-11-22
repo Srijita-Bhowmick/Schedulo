@@ -1,3 +1,4 @@
+import assert from 'node:assert';
 import {
   BacktrackingSolver,
   SchedulingEngine,
@@ -91,10 +92,8 @@ console.log(`Success: ${result1.success}`);
 console.log(`Execution Time: ${result1.executionTimeMs}ms`);
 console.log(`Total Scheduled Hours: ${result1.totalScheduledHours} / 28`);
 
-if (!result1.success) {
-  console.error('FAILED Test 1:', result1.message);
-  process.exit(1);
-}
+assert.strictEqual(result1.success, true, `Test 1 failed with message: ${result1.message}`);
+assert.strictEqual(result1.totalScheduledHours, 28, 'Total scheduled hours must equal 28');
 
 // Check constraint guarantees:
 let clashesDetected = 0;
@@ -130,12 +129,8 @@ for (let i = 0; i < result1.entries.length; i++) {
   }
 }
 
-if (clashesDetected === 0) {
-  console.log('✓ PASS: Zero teacher clashes, zero room clashes, zero batch clashes, zero unavailable violations.');
-} else {
-  console.error(`✕ FAIL: ${clashesDetected} clashes detected!`);
-  process.exit(1);
-}
+assert.strictEqual(clashesDetected, 0, 'Zero clashes must be detected in standard curriculum');
+console.log('✓ PASS: Zero teacher clashes, zero room clashes, zero batch clashes, zero unavailable violations.');
 
 // ----------------------------------------------------
 // Test Case 2: Impossible constraints (bottleneck diagnostic test)
@@ -150,16 +145,9 @@ const impossibleResult = SchedulingEngine.solve(
   []
 );
 
-console.log(`Success (expected false): ${impossibleResult.success}`);
-console.log('Diagnostic Bottleneck Messages:');
-impossibleResult.diagnostics?.forEach((d) => console.log('  •', d));
-
-if (!impossibleResult.success && (impossibleResult.diagnostics?.length || 0) > 0) {
-  console.log('✓ PASS: Accurately returned human-readable bottleneck diagnostics.');
-} else {
-  console.error('✕ FAIL: Diagnostics not returned for mathematically impossible constraints.');
-  process.exit(1);
-}
+assert.strictEqual(impossibleResult.success, false, 'Solver must fail for impossible constraints');
+assert.ok((impossibleResult.diagnostics?.length || 0) > 0, 'Diagnostics must be provided for impossible constraints');
+console.log('✓ PASS: Accurately returned human-readable bottleneck diagnostics.');
 
 // ----------------------------------------------------
 // Test Case 3: Dynamic Multi-Department Cross-Schedule Collision Prevention
@@ -244,7 +232,7 @@ const cseSubjects: SubjectData[] = [
 ];
 
 const eceSubjects: SubjectData[] = [
-  { id: 'sub-ece-1', code: 'EC501', name: 'Digital Signal Processing', type: 'THEORY', weeklyHours: 3, durationSlots: 1, assignedTeacherId: 't-shared-roy' }, // Taught by same Dr. Roy!
+  { id: 'sub-ece-1', code: 'EC501', name: 'Digital Signal Processing', type: 'THEORY', weeklyHours: 3, durationSlots: 1, assignedTeacherId: 't-shared-roy' },
   { id: 'sub-ece-2', code: 'EC502', name: 'Microprocessors', type: 'THEORY', weeklyHours: 3, durationSlots: 1, assignedTeacherId: 't-ece-banerjee' },
 ];
 
@@ -258,7 +246,7 @@ const cseResult = BacktrackingSolver.solveDepartment(
   []
 );
 
-console.log(`CSE Solve Success: ${cseResult.success} (${cseResult.entries.length} classes scheduled)`);
+assert.strictEqual(cseResult.success, true, 'CSE solve must succeed');
 
 // Mark CSE entries as published/locked
 const cseLockedEntries = cseResult.entries.map((e) => ({ ...e, isLocked: true }));
@@ -273,11 +261,10 @@ const eceResult = BacktrackingSolver.solveDepartment(
   cseLockedEntries
 );
 
-console.log(`ECE Solve Success: ${eceResult.success} (${eceResult.entries.length} classes scheduled)`);
+assert.strictEqual(eceResult.success, true, 'ECE solve must succeed around locked CSE entries');
 
-// 3. Verify ZERO minute-overlap across departments for the shared professor and shared room!
+// 3. Verify ZERO minute-overlap across departments for the shared professor and shared room
 let crossDepartmentClashes = 0;
-
 for (const cseEntry of cseLockedEntries) {
   for (const eceEntry of eceResult.entries) {
     if (cseEntry.day !== eceEntry.day) continue;
@@ -306,13 +293,113 @@ for (const cseEntry of cseLockedEntries) {
   }
 }
 
-if (crossDepartmentClashes === 0) {
-  console.log('✓ PASS: Cross-department minute-overlap prevention guaranteed 100% (Dr. Roy & Room 201 clash-free).');
-} else {
-  console.error(`✕ FAIL: ${crossDepartmentClashes} cross-department minute collisions found.`);
-  process.exit(1);
+assert.strictEqual(crossDepartmentClashes, 0, 'Cross-department minute clashes must be 0');
+console.log('✓ PASS: Cross-department minute-overlap prevention guaranteed 100% (Dr. Roy & Room 201 clash-free).');
+
+// ----------------------------------------------------
+// Test Case 4: 2-Hour Continuous Theory Block Collision Prevention
+// ----------------------------------------------------
+console.log('\n[Test 4] Testing 2-hour continuous theory block collision math...');
+const blockDept: DepartmentConfig = {
+  id: 'dept-cse',
+  name: 'Computer Science',
+  code: 'CSE',
+  workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+  dayStartTime: '09:00',
+  periodDurationMins: 60,
+  periodsPerDay: 6,
+};
+
+const blockBatch: BatchData = {
+  id: 'b-block',
+  name: 'CSE-Block-Batch',
+  department: 'CSE',
+  departmentId: 'dept-cse',
+  semester: 5,
+  studentCount: 40,
+  subjectIds: ['sub-2hr-block', 'sub-1hr-single'],
+};
+
+const blockSubjects: SubjectData[] = [
+  {
+    id: 'sub-2hr-block',
+    code: 'CS505',
+    name: 'Advanced Systems (Double Block)',
+    type: 'THEORY',
+    weeklyHours: 3,
+    durationSlots: 1,
+    assignedTeacherId: 't-shared-roy',
+    allowTwoHourBlock: true,
+  },
+  {
+    id: 'sub-1hr-single',
+    code: 'CS506',
+    name: 'Single Slot Subject',
+    type: 'THEORY',
+    weeklyHours: 2,
+    durationSlots: 1,
+    assignedTeacherId: 't-cse-sen',
+  },
+];
+
+const blockResult = BacktrackingSolver.solveDepartment(
+  blockDept,
+  [cseHall],
+  [sharedProfessor, cseTeacher],
+  [blockBatch],
+  blockSubjects,
+  []
+);
+
+assert.strictEqual(blockResult.success, true, 'Block solve must succeed');
+
+// Verify that the 2-hour unit actually spans 120 minutes
+const twoHourEntry = blockResult.entries.find((e) => e.subjectId === 'sub-2hr-block' && e.durationSlots === 2);
+assert.ok(twoHourEntry, 'A 2-hour block entry must be scheduled');
+assert.strictEqual(twoHourEntry.endMinute - twoHourEntry.startMinute, 120, '2-hour block must span exactly 120 minutes');
+
+// Verify no entry on that day collides with the 2-hour block in hour 1 OR hour 2
+for (const entry of blockResult.entries) {
+  if (entry.id === twoHourEntry.id || entry.day !== twoHourEntry.day) continue;
+  const collision = isMinuteOverlap(
+    twoHourEntry.startMinute,
+    twoHourEntry.endMinute,
+    entry.startMinute,
+    entry.endMinute
+  );
+  assert.strictEqual(collision, false, `No class should collide with 2-hour block interval [${twoHourEntry.startMinute}-${twoHourEntry.endMinute}]`);
 }
+console.log('✓ PASS: 2-Hour block spans 120 minutes and prevents collisions across its entire time span.');
+
+// ----------------------------------------------------
+// Test Case 5: Pigeonhole Principle Bottleneck Diagnostic
+// ----------------------------------------------------
+console.log('\n[Test 5] Testing Pigeonhole Principle diagnostic check (6 hrs across 5 days without 2-hr block)...');
+const pigeonholeSubject: SubjectData = {
+  id: 'sub-pigeon',
+  code: 'CS-PIGEON',
+  name: 'Impossible Single Hour Distribution',
+  type: 'THEORY',
+  weeklyHours: 6, // 6 hours across 5 days!
+  durationSlots: 1,
+  assignedTeacherId: 't-shared-roy',
+  allowTwoHourBlock: false,
+};
+
+const pigeonholeResult = BacktrackingSolver.solveDepartment(
+  blockDept, // 5 working days
+  [cseHall],
+  [sharedProfessor],
+  [{ id: 'b-pigeon', name: 'Pigeon Batch', department: 'CSE', semester: 3, studentCount: 30, subjectIds: ['sub-pigeon'] }],
+  [pigeonholeSubject],
+  []
+);
+
+assert.strictEqual(pigeonholeResult.success, false, 'Solver must reject schedule violating pigeonhole principle');
+const hasPigeonholeDiagnostic = (pigeonholeResult.diagnostics || []).some((d) => d.includes('Subject Pigeonhole Bottleneck'));
+assert.strictEqual(hasPigeonholeDiagnostic, true, 'Diagnostic message must mention Subject Pigeonhole Bottleneck');
+console.log('✓ PASS: Accurately caught Pigeonhole constraint violation and returned diagnostic.');
 
 console.log('\n====================================================');
-console.log(' ALL 3 CSP SOLVER UNIT TESTS PASSED CLEANLY (100%) ');
+console.log(' ALL 5 CSP SOLVER UNIT TESTS PASSED WITH 100% STRICT ASSERTIONS ');
 console.log('====================================================');

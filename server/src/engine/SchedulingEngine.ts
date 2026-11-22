@@ -25,6 +25,7 @@ export {
   ScheduleEntryData,
   SolverResult,
   BacktrackingSolver,
+  DepartmentConfig,
   isMinuteOverlap,
   parseTimeToMinutes,
 };
