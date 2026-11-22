@@ -67,6 +67,7 @@ import {
   cn,
 } from './components/ui'
 import { SpatialTimetable } from './components/SpatialTimetable'
+import { WeeklyBoxMatrix, ClassDetailModal } from './components/WeeklyBoxMatrix'
 import './styles.css'
 
 type Path = '/' | '/auth' | '/dashboard/student' | '/dashboard/teacher' | '/dashboard/admin'
@@ -612,7 +613,7 @@ function AlertBanner({ alerts, className }: { alerts: LiveAlert[]; className?: s
 
 function StudentDashboard() {
   const [data, setData] = useState<StudentDashboardData | null>(null)
-  const [view, setView] = useState<DashboardView>('timeline')
+  const [selectedBlock, setSelectedBlock] = useState<ScheduleBlock | null>(null)
   const [toast, setToast] = useState('')
 
   useEffect(() => {
@@ -668,103 +669,31 @@ function StudentDashboard() {
           <Surface className="timeline-card">
             <div className="card-heading">
               <div>
-                <h3>Schedule surface</h3>
-                <p>Every published class for {data.activeBatch}.</p>
+                <h3>Weekly Schedule Matrix · {data.activeBatch}</h3>
+                <p>Modular discrete tiles · 6 time periods across Monday to Friday · Click any tile for full details.</p>
               </div>
-              <div className="timeline-tabs">
-                <button className={view === 'timeline' ? 'is-active' : ''} onClick={() => setView('timeline')}>
-                  TODAY'S TIMELINE
-                </button>
-                <button className={view === 'matrix' ? 'is-active' : ''} onClick={() => setView('matrix')}>
-                  FULL WEEKLY MATRIX
-                </button>
-              </div>
+              <Badge tone="mist" dot>PUBLISHED</Badge>
             </div>
-            {view === 'timeline' ? <ScheduleTable blocks={data.blocks} /> : <WeeklyMatrix blocks={data.blocks} />}
+            <div style={{ padding: '16px 20px' }}>
+              <WeeklyBoxMatrix
+                blocks={data.blocks}
+                mode="student"
+                secondaryLabel="faculty"
+                onSelectBlock={(b) => setSelectedBlock(b)}
+              />
+            </div>
           </Surface>
         </div>
+        {selectedBlock && (
+          <ClassDetailModal
+            block={selectedBlock}
+            mode="student"
+            onClose={() => setSelectedBlock(null)}
+          />
+        )}
         {toast && <div className="toast">{toast}</div>}
       </main>
     </DashboardShell>
-  )
-}
-
-function ScheduleTable({ blocks }: { blocks: ScheduleBlock[] }) {
-  return (
-    <div style={{ overflowX: 'auto' }}>
-      <table className="timeline-table">
-        <thead>
-          <tr>
-            <th>TIME</th>
-            <th>SUBJECT</th>
-            <th>FACULTY</th>
-            <th>ROOM</th>
-            <th>STATE</th>
-          </tr>
-        </thead>
-        <tbody>
-          {blocks.slice(0, 6).map((block) => (
-            <tr key={block.id}>
-              <td>
-                {block.day} / {block.start}
-              </td>
-              <td>
-                <span className="class-code">{block.code}</span>
-                {block.subject}
-              </td>
-              <td>{block.faculty}</td>
-              <td className="mono">{block.room}</td>
-              <td>
-                {block.status === 'live' ? (
-                  <Badge tone="mist" dot>LIVE</Badge>
-                ) : block.status === 'clash' ? (
-                  <Badge tone="ember" dot>CLASH</Badge>
-                ) : (
-                  <Badge tone="neutral">CONFIRMED</Badge>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function WeeklyMatrix({ blocks }: { blocks: ScheduleBlock[] }) {
-  const rows = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00']
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
-  return (
-    <div className="matrix-wrap">
-      <div className="weekly-matrix">
-        <div className="matrix-head">LOCAL</div>
-        {days.map((day) => (
-          <div className="matrix-head" key={day}>
-            {day.toUpperCase()}
-          </div>
-        ))}
-        {rows.map((time) => (
-          <React.Fragment key={time}>
-            <div className="matrix-time" key={`${time}-label`}>
-              {time}
-            </div>
-            {days.map((day) => {
-              const block = blocks.find((item) => item.day === day && item.start === time)
-              return (
-                <div className="matrix-cell" key={`${day}-${time}`}>
-                  {block && (
-                    <div className={cn('matrix-block', block.status === 'clash' && 'is-clash')}>
-                      <strong>{block.code}</strong>
-                      <span>{block.room}</span>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </React.Fragment>
-        ))}
-      </div>
-    </div>
   )
 }
 
@@ -772,6 +701,7 @@ function TeacherDashboard() {
   const [data, setData] = useState<TeacherDashboardData | null>(null)
   const [unavailable, setUnavailable] = useState<string[]>([])
   const [modalOpen, setModalOpen] = useState(false)
+  const [selectedBlock, setSelectedBlock] = useState<ScheduleBlock | null>(null)
   const [targetRoom, setTargetRoom] = useState('Room 201')
   const [targetBatch, setTargetBatch] = useState('CSE-5A')
   const [validation, setValidation] = useState('')
@@ -785,10 +715,17 @@ function TeacherDashboard() {
   }, [])
 
   if (!data) return <LoadingDashboard />
-  const slots = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00']
+
   const toggleSlot = (day: string, time: string) => {
     const key = `${day}-${time}`
     setUnavailable((items) => (items.includes(key) ? items.filter((item) => item !== key) : [...items, key]))
+  }
+
+  const handleRescheduleBlock = (block: ScheduleBlock) => {
+    setTargetRoom(block.room)
+    setTargetBatch(block.batch)
+    setValidation('')
+    setModalOpen(true)
   }
 
   const validate = async () => {
@@ -804,7 +741,7 @@ function TeacherDashboard() {
         <DashboardHeader
           eyebrow={`TEACHER / ${data.faculty.toUpperCase()}`}
           title="Teaching matrix"
-          body="Assigned theory classes across batches · 0 room collisions"
+          body="Assigned theory classes across batches · Click open cells to block, or click classes to reschedule"
           actions={
             <Button tone="ember" size="sm" icon={RefreshCw} onClick={() => setModalOpen(true)}>
               Reschedule / Cancel
@@ -814,55 +751,25 @@ function TeacherDashboard() {
         <div className="teacher-grid">
           <div className="dashboard-stack">
             <div className="instruction-strip">
-              <strong>Block unavailable slots</strong> · Select any open cell below to exclude it from future solver runs. Assigned classes remain locked.
+              <strong>Interactive Availability Matrix</strong> · Click any open free box to toggle <strong>Blocked / Unavailable</strong> for future solver runs. Click any assigned class box to inspect or reschedule.
             </div>
             <Surface>
               <div className="card-heading">
                 <div>
-                  <h3>My teaching matrix</h3>
-                  <p>{data.faculty} · Assigned Theory Courses</p>
+                  <h3>My Teaching Matrix · {data.faculty}</h3>
+                  <p>Discrete weekly tiles · Live availability sync · Assigned classes remain locked</p>
                 </div>
-                <Badge tone="mist">EDIT MODE</Badge>
+                <Badge tone="mist">INTERACTIVE</Badge>
               </div>
-              <div style={{ overflowX: 'auto' }}>
-                <table className="timeline-table availability-table">
-                  <thead>
-                    <tr>
-                      <th>DAY</th>
-                      {slots.map((slot) => (
-                        <th key={slot}>{slot}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((day) => (
-                      <tr key={day}>
-                        <td>{day}</td>
-                        {slots.map((slot) => {
-                          const assigned = data.blocks.find((block) => block.day === day && block.start === slot)
-                          const key = `${day}-${slot}`
-                          return (
-                            <td key={slot}>
-                              {assigned ? (
-                                <button className="slot-button is-occupied" type="button" title={`${assigned.code} assigned`}>
-                                  {assigned.code}
-                                </button>
-                              ) : (
-                                <button
-                                  className={cn('slot-button', unavailable.includes(key) && 'is-unavailable')}
-                                  type="button"
-                                  onClick={() => toggleSlot(day, slot)}
-                                >
-                                  {unavailable.includes(key) ? 'BLOCKED' : 'OPEN'}
-                                </button>
-                              )}
-                            </td>
-                          )
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div style={{ padding: '16px 20px' }}>
+                <WeeklyBoxMatrix
+                  blocks={data.blocks}
+                  mode="teacher"
+                  unavailableSlots={unavailable}
+                  onToggleSlot={toggleSlot}
+                  onSelectBlock={(b) => setSelectedBlock(b)}
+                  secondaryLabel="batch"
+                />
               </div>
             </Surface>
           </div>
@@ -898,6 +805,14 @@ function TeacherDashboard() {
             </Surface>
           </div>
         </div>
+        {selectedBlock && (
+          <ClassDetailModal
+            block={selectedBlock}
+            mode="teacher"
+            onClose={() => setSelectedBlock(null)}
+            onReschedule={handleRescheduleBlock}
+          />
+        )}
         {modalOpen && (
           <RescheduleModal
             room={targetRoom}
@@ -976,9 +891,16 @@ function AdminDashboard() {
   const [solving, setSolving] = useState(false)
   const [solver, setSolver] = useState<Awaited<ReturnType<typeof runDeterministicSolver>> | null>(null)
   const [published, setPublished] = useState('')
+  const [selectedBlock, setSelectedBlock] = useState<ScheduleBlock | null>(null)
+  const [filterBatch, setFilterBatch] = useState<string>('ALL')
+  const [filterFaculty, setFilterFaculty] = useState<string>('ALL')
+
+  const fetchDashboardData = () => {
+    getAdminDashboard().then(setData)
+  }
 
   useEffect(() => {
-    getAdminDashboard().then(setData)
+    fetchDashboardData()
   }, [])
 
   if (!data) return <LoadingDashboard />
@@ -989,6 +911,7 @@ function AdminDashboard() {
     const result = await runDeterministicSolver()
     setSolver(result)
     setSolving(false)
+    fetchDashboardData()
   }
 
   const publish = async () => {
@@ -1003,19 +926,89 @@ function AdminDashboard() {
     Subjects: data.subjects.map((subject) => `${subject.code} · ${subject.name} (${subject.hours}h/wk)`),
   }
 
+  // Filter blocks based on dropdown selection
+  const filteredBlocks = (data.blocks || []).filter((block) => {
+    const matchesBatch = filterBatch === 'ALL' || block.batch === filterBatch
+    const matchesFaculty =
+      filterFaculty === 'ALL' || block.faculty === filterFaculty || block.faculty.includes(filterFaculty)
+    return matchesBatch && matchesFaculty
+  })
+
   return (
     <DashboardShell role="admin">
       <main className="dashboard-main">
         <DashboardHeader
           eyebrow="DEPARTMENT ADMIN / SCHEDULING OPERATIONS"
           title="A valid week, assembled."
-          body="Configure theory resources, run the deterministic solver, then publish one schedule surface."
+          body="Configure theory resources, run the deterministic solver, inspect the weekly boxes, then publish."
           actions={
             <Button tone="dark" size="sm" icon={Play} loading={solving} onClick={runSolver}>
               Run Algorithmic Solver
             </Button>
           }
         />
+
+        {/* Live Generated Weekly Matrix (Centerpiece) */}
+        <Surface style={{ marginBottom: 20 }}>
+          <div className="card-heading">
+            <div>
+              <h3>Generated Weekly Timetable Matrix</h3>
+              <p>Modular discrete tiles · Inspect solver-assigned lecture domains across batches and faculty before publishing campus-wide.</p>
+            </div>
+            <Badge tone="mist" dot>MRV VERIFIED</Badge>
+          </div>
+          <div style={{ padding: '16px 20px' }}>
+            {/* Filter Bar */}
+            <div className="matrix-filter-bar">
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="filter-group">
+                  <span className="filter-label">FILTER BATCH:</span>
+                  <select
+                    className="matrix-select"
+                    value={filterBatch}
+                    onChange={(e) => setFilterBatch(e.target.value)}
+                  >
+                    <option value="ALL">All Batches (Combined)</option>
+                    {data.batches.map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="filter-group">
+                  <span className="filter-label">FILTER FACULTY:</span>
+                  <select
+                    className="matrix-select"
+                    value={filterFaculty}
+                    onChange={(e) => setFilterFaculty(e.target.value)}
+                  >
+                    <option value="ALL">All Faculty</option>
+                    {data.faculty.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="matrix-meta-pill">
+                <span className="dot" />
+                <strong>{filteredBlocks.length} SLOTS DISPLAYED</strong> · 0 CONFLICTS
+              </div>
+            </div>
+
+            {/* Weekly Box Matrix */}
+            <WeeklyBoxMatrix
+              blocks={filteredBlocks}
+              mode="admin"
+              secondaryLabel="both"
+              onSelectBlock={(b) => setSelectedBlock(b)}
+            />
+          </div>
+        </Surface>
+
+        {/* Resource Workspace & Execution Log */}
         <div className="dashboard-grid dashboard-grid--admin">
           <div className="dashboard-stack">
             <Surface>
@@ -1120,6 +1113,14 @@ function AdminDashboard() {
             </Surface>
           </div>
         </div>
+
+        {selectedBlock && (
+          <ClassDetailModal
+            block={selectedBlock}
+            mode="admin"
+            onClose={() => setSelectedBlock(null)}
+          />
+        )}
       </main>
     </DashboardShell>
   )

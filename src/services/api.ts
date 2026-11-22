@@ -55,6 +55,7 @@ export interface AdminDashboardData {
   batches: string[]
   subjects: { code: string; name: string; hours: number }[]
   lastRun: { time: string; duration: string; backtracks: number } | null
+  blocks: ScheduleBlock[]
 }
 
 export interface AuthPayload {
@@ -449,20 +450,57 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
     const token = getStoredToken()
     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
 
-    const res = await fetch(`${API_BASE}/entities`, { headers })
-    if (res.ok) {
-      const data = await res.json()
+    const [entitiesRes, schedRes] = await Promise.all([
+      fetch(`${API_BASE}/entities`, { headers }),
+      fetch(`${API_BASE}/schedule`, { headers }),
+    ])
+
+    if (entitiesRes.ok) {
+      const data = await entitiesRes.json()
+      const schedData = schedRes.ok ? await schedRes.json() : { entries: [] }
+
+      const periodTimes = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00']
+      const dayMap: Record<string, string> = {
+        Monday: 'Mon',
+        Tuesday: 'Tue',
+        Wednesday: 'Wed',
+        Thursday: 'Thu',
+        Friday: 'Fri',
+      }
+
+      const blocks: ScheduleBlock[] = (schedData.entries || []).map((e: any) => {
+        const sub = data.subjects?.find((s: any) => s.id === e.subjectId)
+        const teacher = data.teachers?.find((t: any) => t.id === e.teacherId)
+        const room = data.rooms?.find((r: any) => r.id === e.roomId)
+        const batch = data.batches?.find((b: any) => b.id === e.batchId)
+        const startHour = periodTimes[e.periodIndex] || '09:00'
+
+        return {
+          id: e.id,
+          code: sub?.code || 'CS-501',
+          subject: sub?.name || 'Subject',
+          faculty: teacher?.name || 'Faculty',
+          room: room?.roomNumber || 'Room 101',
+          batch: batch?.name || 'CSE-5A',
+          day: dayMap[e.day] || e.day.slice(0, 3),
+          start: startHour,
+          end: `${parseInt(startHour.slice(0, 2), 10) + 1}:00`,
+          status: e.isLocked ? 'live' : 'upcoming',
+        }
+      })
+
       return {
         role: 'admin',
         rooms: (data.rooms || []).map((r: any) => `${r.roomNumber} (${r.capacity} seats)`),
-        faculty: (data.teachers || []).map((t: any) => `${t.name} (${t.shortCode})`),
-        batches: (data.batches || []).map((b: any) => `${b.name} (${b.studentCount} students)`),
+        faculty: (data.teachers || []).map((t: any) => t.name),
+        batches: (data.batches || []).map((b: any) => b.name),
         subjects: (data.subjects || []).map((s: any) => ({
           code: s.code,
           name: s.name,
           hours: s.weeklyHours,
         })),
         lastRun: { time: 'Today, 09:30:00', duration: '3.8ms', backtracks: 0 },
+        blocks: blocks.length > 0 ? blocks : fallbackWeeklyBlocks,
       }
     }
   } catch (err) {
@@ -472,8 +510,8 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
   return {
     role: 'admin',
     rooms: ['Room 101 (70 seats)', 'Room 102 (70 seats)', 'Room 201 (65 seats)', 'Room 202 (65 seats)'],
-    faculty: ['Dr. Debabrata Roy (DR)', 'Prof. Ananya Sen (AS)', 'Dr. Subhashish Mukherjee (SM)', 'Dr. Priya Banerjee (PB)'],
-    batches: ['CSE-5A (60 students)', 'IT-5A (55 students)'],
+    faculty: ['Dr. Debabrata Roy', 'Prof. Ananya Sen', 'Dr. Subhashish Mukherjee', 'Dr. Priya Banerjee'],
+    batches: ['CSE-5A', 'IT-5A'],
     subjects: [
       { code: 'CS501', name: 'Operating Systems', hours: 4 },
       { code: 'CS502', name: 'Database Management Systems', hours: 4 },
@@ -481,6 +519,7 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
       { code: 'CS504', name: 'Software Engineering', hours: 3 },
     ],
     lastRun: { time: 'Today, 09:30:00', duration: '3.8ms', backtracks: 0 },
+    blocks: fallbackWeeklyBlocks,
   }
 }
 

@@ -54,8 +54,8 @@ export function StatusPill({ children, tone = 'mist', icon: Icon = Check }: { ch
   )
 }
 
-export function Surface({ children, className, dark = false }: { children: ReactNode; className?: string; dark?: boolean }) {
-  return <section className={cn('surface', dark && 'surface--dark', className)}>{children}</section>
+export function Surface({ children, className, dark = false, style }: { children: ReactNode; className?: string; dark?: boolean; style?: React.CSSProperties }) {
+  return <section className={cn('surface', dark && 'surface--dark', className)} style={style}>{children}</section>
 }
 
 export function SectionLabel({ children, eyebrow }: { children: ReactNode; eyebrow?: string }) {
